@@ -1,18 +1,13 @@
 ;;; MouseText ToolKit
 
           .include "MouseTextToolKitDefines.s"
-          .include "/pkg/cc65-2.19/share/cc65/asminc/apple2.inc"
-          .setcpu "6502"
+          .include "SoftSwitches.s"
+          .include "ProDOSMLI.s"
+          .include "MouseText.s"
+          .include "Mouse.s"
+          .include "ControlChars.s"
 
-KBD               := $C000   ; Read keyboard
-TXTPAGE1          := $C054
-TXTPAGE2          := $C055
-RDPAGE2           := $C01C
-VBLINT            := $C019
-SET80VID          := $C00D
-CLR80VID          := $C00C
-SPKR              := $C030
-ProDOSMLI         := $BF00
+          .setcpu "6502"
 
 TextRowBasePtr    := $0000
 EventPtr          := $0002
@@ -232,7 +227,7 @@ MouseButtonState:
           bit   MouseNotFoundFlag
           bmi   L6277          ; return if mouse not present
           pha
-          lda   TXTPAGE1
+          lda   SoftSwitch::TXTPAGE1
 MouseFirmwareBaseAddress:= * + 2
           lda   $C000,y        ; operand gets overwritten
           sta   MouseFirmwareEntryPoint
@@ -370,7 +365,7 @@ L6332:    lda   #$00
           pha
           lda   #$06
           sta   $FBB3 ; temporarily set the machine ID byte if LCRAM is on
-          ldy   #InitMouseEP
+          ldy   #MouseCall::InitMouse
           jsr   CallMouseFirmware
           pla
           sta   $FBB3 ; restore the machine ID byte
@@ -382,7 +377,7 @@ L6332:    lda   #$00
           lda   MouseUpperClampBoundX+1
           sta   $05F8
           lda   #$00
-          ldy   #ClampMouseEP ; clamp X axis
+          ldy   #MouseCall::ClampMouse ; clamp X axis
           jsr   CallMouseFirmware
           lda   #$00
           sta   $0478
@@ -392,16 +387,16 @@ L6332:    lda   #$00
           lda   MouseUpperClampBoundY+1
           sta   $05F8
           lda   #$01
-          ldy   #ClampMouseEP ; clamp Y axis
+          ldy   #MouseCall::ClampMouse ; clamp Y axis
           jsr   CallMouseFirmware
-          ldy   #HomeMouseEP
+          ldy   #MouseCall::HomeMouse
           jsr   CallMouseFirmware
           bit   InterruptAllocatedFlag
           bmi   L6393
           lda   #$01 ; mouse on, interrupts off
           bne   L6395
 L6393:    lda   #$09 ; mouse on, VBL interrupt on
-L6395:    ldy   #SetMouseEP ; set mouse mode
+L6395:    ldy   #MouseCall::SetMouse ; set mouse mode
           jsr   CallMouseFirmware
           rts
 .endproc
@@ -414,7 +409,7 @@ L6395:    ldy   #SetMouseEP ; set mouse mode
           sei
           bit   MouseNotFoundFlag
           bmi   L63E0 ; branch if flag set
-          ldy   #ReadMouseEP
+          ldy   #MouseCall::ReadMouse
           jsr   CallMouseFirmware
           ldx   CallMouseFirmware::MouseSlot_Cs
           lda   $03B8,x
@@ -482,7 +477,7 @@ L641B:    asl   MousePosYScaledUp
           sta   $0438,x
           lda   MousePosYScaledUp+1
           sta   $0538,x
-          ldy   #PosMouseEP
+          ldy   #MouseCall::PosMouse
           jsr   CallMouseFirmware
 L6444:    plp
           rts
@@ -490,7 +485,7 @@ L6444:    plp
 
 .proc TurnOffMouse
           lda   #$00
-          ldy   #SetMouseEP
+          ldy   #MouseCall::SetMouse
           jsr   CallMouseFirmware
           jsr   ServeMouse
           rts
@@ -499,7 +494,7 @@ L6444:    plp
 .proc ServeMouse
           bit   MouseNotFoundFlag
           bmi   ERR
-          ldy   #ServeMouseEP
+          ldy   #MouseCall::ServeMouse
           jsr   CallMouseFirmware
           rts
 ERR:      sec
@@ -572,12 +567,12 @@ L64AA:    sta   InterruptAllocatedFlag
           lda   (ParamTablePtr),y
           bne   L64BC ; 80 columns mode
           sta   Columns80Flag
-          sta   CLR80VID
+          sta   SoftSwitch::CLR80VID
           lda   #$27 ; 39
           bne   L64C6 ; branch always taken
 L64BC:    lda   #$80
           sta   Columns80Flag
-          sta   SET80VID
+          sta   SoftSwitch::SET80VID
           lda   #$4F ; 79
 L64C6:    sta   MaxColumnNumber
           lda   #$01
@@ -611,7 +606,7 @@ L6502:    bit   InterruptAllocatedFlag
 L650C:    jsr   ConfigureMouse
           lda   #$80
           sta   DeskTopStartedFlag
-          sta   SETALTCHAR
+          sta   SoftSwitch::SETALTCHAR
           rts
 .endproc
 
@@ -620,19 +615,19 @@ L650C:    jsr   ConfigureMouse
           sta   VBLCounter
           lda   #$00
           sta   VBLCounter+1
-          ldx   VBLINT
+          ldx   SoftSwitch::VBLINT
 L6525:    txa
-          eor   VBLINT
+          eor   SoftSwitch::VBLINT
           bpl   L6525 ; loop until VBLINT flag toggles
-L652B:    ldy   VBLINT
+L652B:    ldy   SoftSwitch::VBLINT
 L652E:    inc   VBLCounter ; increment counter
           bne   L6536
           inc   VBLCounter+1
 L6536:    tya
-          eor   VBLINT ; loop until VBLINT flag toggles
+          eor   SoftSwitch::VBLINT ; loop until VBLINT flag toggles
           bpl   L652E
           txa
-          eor   VBLINT
+          eor   SoftSwitch::VBLINT
           bpl   L652B
           ldx   #$00 ; 0 = 60Hz
           lda   VBLCounter+1
@@ -640,7 +635,7 @@ L6536:    tya
           bcc   L654C
           inx   ; 1 = 50Hz (not supported on IIc)
 L654C:    txa
-          ldy   #MouseTimeDataEP
+          ldy   #MouseCall::TimeData
           jsr   CallMouseFirmware
           rts
 VBLCounter:
@@ -754,8 +749,8 @@ AllocInterruptAddr:
           beq   OK
           clc
           rts
-OK:       jsr   ProDOSMLI
-          .byte $40 ; ALLOC_INTERRUPT
+OK:       jsr   ProDOS::MLI
+          .byte ProDOS::CALLOCINT
           .addr AllocInterruptParams
           rts
 .endproc
@@ -772,8 +767,8 @@ DeallocInterruptNum:
           bne   OUT ; skip if not ProDOS
           lda   AllocInterruptNum
           sta   DeallocInterruptNum
-          jsr   ProDOSMLI
-          .byte $41 ; DEALLOC_INTERRUPT
+          jsr   ProDOS::MLI
+          .byte ProDOS::CDEALLOCINT
           .addr DeallocInterruptParams
 OUT:      rts
 .endproc
@@ -788,12 +783,12 @@ StorageForRDPAGE2:
 
 ;;; Save soft switch states to buffer #X (0 or 1)
 .proc SaveSoftSwitchStates
-          lda   RD80COL
+          lda   SoftSwitch::RD80COL
           sta   StorageForRD80COL,x
-          lda   RDPAGE2
+          lda   SoftSwitch::RDPAGE2
           sta   StorageForRDPAGE2,x
-          sta   SET80COL
-          lda   TXTPAGE1
+          sta   SoftSwitch::SET80COL
+          lda   SoftSwitch::TXTPAGE1
           rts
 .endproc
 
@@ -801,14 +796,14 @@ StorageForRDPAGE2:
 .proc RestoreSoftSwitchStates
           lda   StorageForRDPAGE2,x
           bmi   L661B
-          lda   TXTPAGE1
+          lda   SoftSwitch::TXTPAGE1
           jmp   L661E
-L661B:    lda   TXTPAGE2
+L661B:    lda   SoftSwitch::TXTPAGE2
 L661E:    lda   StorageForRD80COL,x
           bmi   L6627
-          sta   CLR80COL
+          sta   SoftSwitch::CLR80COL
           rts
-L6627:    sta   SET80COL
+L6627:    sta   SoftSwitch::SET80COL
           rts
 .endproc
 
@@ -831,7 +826,7 @@ L6627:    sta   SET80COL
           tax
           php
           sei
-          lda   TXTPAGE1
+          lda   SoftSwitch::TXTPAGE1
           lda   CurrentXCoord
           bit   Columns80Flag
           bmi   L664F ; branch if on
@@ -840,10 +835,10 @@ L6627:    sta   SET80COL
 L664F:    lsr   a ; shift odd/even bit into Carry
           tay
           bcs   L6656 ; branch if odd column
-          lda   TXTPAGE2
+          lda   SoftSwitch::TXTPAGE2
 L6656:    txa
           sta   (TextRowBasePtr),y
-          lda   TXTPAGE1
+          lda   SoftSwitch::TXTPAGE1
           plp
           rts
 .endproc
@@ -867,7 +862,7 @@ L6656:    txa
 .proc ReadCharAtCurrentCoord
           php
           sei
-          lda   TXTPAGE1
+          lda   SoftSwitch::TXTPAGE1
           lda   CurrentXCoord
           bit   Columns80Flag
           bmi   L6681 ; branch if off
@@ -876,10 +871,10 @@ L6656:    txa
 L6681:    lsr   a
           tay
           bcs   L6688 ; branch if odd column
-          lda   TXTPAGE2
+          lda   SoftSwitch::TXTPAGE2
 L6688:    lda   (TextRowBasePtr),y
           tay
-          lda   TXTPAGE1
+          lda   SoftSwitch::TXTPAGE1
           tya
           plp
           rts
@@ -1156,7 +1151,7 @@ CursorChar:
           sta   CursorVisibleFlag
           sta   CursorXCoord
           sta   CursorYCoord
-          lda   #MTCharArrowCursor
+          lda   #MouseText::ArrowCursor
           sta   CursorChar
           rts
 .endproc
@@ -1571,9 +1566,9 @@ CheckEventsPostHook:
 L6A93:    rts
 
 .proc ProcessKeyboardEvents
-          lda   BUTN1 ; Solid-Apple
+          lda   SoftSwitch::RDBTN1 ; Solid-Apple
           asl   a
-          lda   BUTN0 ; Open-Apple
+          lda   SoftSwitch::RDBTN0 ; Open-Apple
           and   #%10000000
           rol   a
           rol   a
@@ -1609,11 +1604,11 @@ L6AD2:    jsr   ReadMouseState
           bmi   L6AEB
           bit   MouseEmulationFlags
           bpl   OUT ; branch if Safety-Net mode is off
-L6AEB:    lda   KBD ; read keyboard soft switch
+L6AEB:    lda   SoftSwitch::KBD ; read keyboard soft switch
           bpl   OUT ; branch if no key down
           and   #%01111111 ; strip MSB
           sta   EventBufferXCoord
-          bit   KBDSTRB ; clear keyboard strobe
+          bit   SoftSwitch::KBDSTRB ; clear keyboard strobe
           lda   AppleKeyModifierMask
           sta   EventBufferYCoord
           lda   #EventTypeKeyPress
@@ -1895,7 +1890,7 @@ ERR:      sec
 .proc ProcessKeyboardMouseModeEvent
           bit   MouseEmulationFlags
           bvs   L6D35 ; branch if Keyboard Mouse Mode on
-          lda   BUTN0 ; Open-Apple
+          lda   SoftSwitch::RDBTN0 ; Open-Apple
           bpl   FinishKeyboardMouseMode1 ; if Open-Apple not down
 L6D35:    jsr   GetHeadEvent
           bcs   L6D54 ; branch if queue empty
@@ -1914,7 +1909,7 @@ L6D35:    jsr   GetHeadEvent
 L6D54:    jsr   MoveCursorToLatestMousePos
           bit   MouseEmulationFlags
           bvs   L6D75 ; branch if Keyboard Mouse Mode is on
-          lda   BUTN1 ; Solid-Apple
+          lda   SoftSwitch::RDBTN1 ; Solid-Apple
           eor   PreviousAppleKeyModifierMask ; Solid Apple key state changed?
           bpl   L6D75 ; branch if no
           eor   PreviousAppleKeyModifierMask ; A = $00 or $80 here
@@ -1946,9 +1941,9 @@ L6DA1:    rts
 .endproc
 
 .proc EndKeyboardMouseModeOperation
-          cmp   #CharEsc
+          cmp   #ControlChar::Esc
           beq   CancelOperationAndExitKeyboardMouseMode
-          cmp   #CharReturn
+          cmp   #ControlChar::Return
           beq   FinishOperationAndExitKeyboardMouseMode
           sta   KeyboardMouseModeSavedKeypress
           ldx   #$07
@@ -2064,14 +2059,14 @@ ArrowKeyCoordinateTable:
 
 ;;; Returns with Carry set if the keypress wasn't recognized.
 .proc ProcessKeyboardMouseModeArrowKeypress
-          cmp   #CharTab ; tab key?
+          cmp   #ControlChar::Tab ; tab key?
           beq   L6E59 ; yes - invalid
-          cmp   #CharRightArrow ; right arrow key?
+          cmp   #ControlChar::RightArrow ; right arrow key?
           bne   L6E51 ; no - branch
-          lda   #CharTab ; yes - remap it to Tab
-L6E51:    cmp   #CharLeftArrow
+          lda   #ControlChar::Tab ; yes - remap it to Tab
+L6E51:    cmp   #ControlChar::LeftArrow
           bcc   L6E59 ; less than $08 - invalid
-          cmp   #CharUpArrow+1 ; up or down arrow key?
+          cmp   #ControlChar::UpArrow+1 ; up or down arrow key?
           bcc   L6E5B ; yes
 L6E59:    sec  ; no - invalid
           rts
@@ -2159,7 +2154,7 @@ L6EE7:    clc
           sta   EventBuffer2XCoord
           jsr   FindMenuAtXCoord
           pla   ; restore char typed
-          cmp   #CharTab ; right arrow (remapped as tab)?
+          cmp   #ControlChar::Tab ; right arrow (remapped as tab)
           beq   L6F1C ; branch if yes
           ldx   SelectedMenuNumberOrID
           dex   ; select previous menu
@@ -2197,7 +2192,7 @@ L6F44:    jsr   LoadMenuStructPtr
           bcs   L6F83 ; branch if y coordinate is past bottom of menu
 L6F52:    pla
           pha
-          cmp   #CharDownArrow ; down arrow?
+          cmp   #ControlChar::DownArrow ; down arrow?
           beq   L6F65 ; branch if yes
           ldx   MouseYCoord
           beq   L6F60 ; if in row 0 (menu bar), wrap around to bottom item
@@ -2296,7 +2291,7 @@ L6FE8:    sbc   #$01
           pla
           sbc   #$01
           bne   L6FE7
-          lda   SPKR
+          lda   SoftSwitch::SPKR
           dey
           bne   L6FE4
           rts
@@ -2613,7 +2608,7 @@ L7217:    jsr   DrawMenuItem
           sta   CharRegister
           jsr   PrintCharAtCurrentCoord
           inc   CurrentXCoord
-          lda   #MTCharOverscore
+          lda   #MouseText::Overscore
           sta   CharRegister
 L723F:    jsr   PrintCharAtCurrentCoord
           inc   CurrentXCoord
@@ -2632,12 +2627,12 @@ OUT:      rts
           stx   CurrentYCoord
           lda   TextRectangleEndXCoordPlus1
           sta   CurrentXCoord
-          lda   #MTCharLeftVerticalBar ; left edge
+          lda   #MouseText::LeftVerticalBar ; left edge
           sta   CharRegister
           jsr   PrintCharAtCurrentCoord
           lda   TextRectangleXCoord
           sta   CurrentXCoord
-          lda   #MTCharRightVerticalBar ; right edge
+          lda   #MouseText::RightVerticalBar ; right edge
           sta   CharRegister
           jsr   PrintCharAtCurrentCoord
           ldy   #$00
@@ -2693,17 +2688,17 @@ MenuItemShortcutChar:
           bcs   L72E3 ; branch if not a control character
           ora   #%01000000 ; convert to uppercase
           sta   MenuItemShortcutChar
-          ldy   #MTCharDiamond
+          ldy   #MouseText::Diamond
           bne   L72F4 ; branch always taken
 L72E3:    sta   MenuItemShortcutChar
           ldy   #$00
           lda   (MenuItemStructPtr),y ; item option byte
           and   #%00000011 ; has Apple key modifier?
           beq   OUT ; branch if no
-          ldy   #MTCharOpenApple
+          ldy   #MouseText::OpenApple
           lsr   a
           bcs   L72F4
-          dey   ; Y = MTCharSolidApple
+          dey   ; Y = MouseText::SolidApple
 L72F4:    sty   CharRegister
           ldx   TextRectangleEndXCoordPlus1
           dex
@@ -3035,7 +3030,7 @@ DrawMenuItemMarkChar:
 .proc DrawMenuItemTitleAndMarkNormal
           ldx   #CharSpace
           stx   OutputMenuTitleSpaceChar
-          ldx   #MTCharCheckmark
+          ldx   #MouseText::Checkmark
           stx   DrawMenuItemMarkChar
           ldx   #$00
           stx   MenuItemTitleInverseFlag
@@ -3047,7 +3042,7 @@ DrawMenuItemMarkChar:
 .proc DrawMenuItemTitleAndMarkInverse
           ldx   #CharInvSpace
           stx   OutputMenuTitleSpaceChar
-          ldx   #MTCharInvCheckmark
+          ldx   #MouseText::InverseCheckmark
           stx   DrawMenuItemMarkChar
           ldx   #$80
           stx   MenuItemTitleInverseFlag
@@ -3186,7 +3181,7 @@ FindMenuItemForKeyMenuCount:
           dey
           lda   (ParamTablePtr),y ; character typed
           and   #%01111111 ; clear MSB
-          cmp   #CharEsc
+          cmp   #ControlChar::Esc
           bne   L766B
           jsr   KeyboardMouse ; turn on keyboard mouse mode
           jsr   HandleMenuInteraction
@@ -5099,17 +5094,17 @@ L8310:     sta   WindowIsDialogOrAlertFlag
            lda   #$80
 L831B:     sta   WindowHasCloseBoxFlag
            ldy   #$00
-           lda   #MTCharOverUnderScore
+           lda   #MouseText::OverUnderScore
            bit   WindowIsDialogOrAlertFlag
            bpl   L8329 ; branch if not dialog/alert
            lda   #CharUnderscore
 L8329:     jsr   DrawRowOfCharAcrossWindow ; draw top edge of window
-           lda   #MTCharLeftVerticalBar
+           lda   #MouseText::LeftVerticalBar
            jsr   DrawColumnOfCharAcrossWindow ; draw right edge of window
            jsr   ResetWindowDrawingCoordToWindowTopLeftCorner
-           lda   #MTCharRightVerticalBar
+           lda   #MouseText::RightVerticalBar
            jsr   DrawColumnOfCharAcrossWindow ; draw left edge of window
-           lda   #MTCharOverscore
+           lda   #MouseText::Overscore
            jsr   DrawRowOfCharAcrossWindow ; draw bottom edge of window
            lda   DrawWindowSaveOverwittenCharsFlag
            ora   DrawWindowRestoreOverrittenCharsFlag
@@ -5121,7 +5116,7 @@ L8329:     jsr   DrawRowOfCharAcrossWindow ; draw top edge of window
            bmi   L835E ; branch if yes
            jsr   ResetWindowDrawingCoordToWindowTopLeftCorner
            jsr   IncrementWindowDrawingXCoord ; x coord ++
-           lda   #MTCharDottedBox ; draw window close box
+           lda   #MouseText::DottedBox ; draw window close box
            jsr   OutputWindowCharWithBackingStore
 L835E:     jsr   DrawWindowTitle ; draw window title bar
 L8361:     rts
@@ -6285,10 +6280,10 @@ NO:       sec
           bpl   OUT ; branch if no
           ldy   CurrentContentLengthMinus1
           ldx   #$00
-          lda   #MTCharLeftScrollArrow
+          lda   #MouseText::LeftScrollArrow
           jsr   OutputCharInWindowAtXY
           ldx   RightScrollArrowXPos
-          lda   #MTCharRightScrollArrow
+          lda   #MouseText::RightScrollArrow
           jsr   OutputCharInWindowAtXY
 OUT:      rts
 .endproc
@@ -6298,10 +6293,10 @@ OUT:      rts
           bpl   OUT ; branch if no
           ldx   CurrentContentWidthMinus1
           ldy   #$00
-          lda   #MTCharUpScrollArrow
+          lda   #MouseText::UpScrollArrow
           jsr   OutputCharInWindowAtXY
           ldy   DownScrollArrowYPos
-          lda   #MTCharDownScrollArrow
+          lda   #MouseText::DownScrollArrow
           jsr   OutputCharInWindowAtXY
 OUT:      rts
 .endproc
@@ -6309,7 +6304,7 @@ OUT:      rts
 .proc DrawWindowBottomEdge
           ldy   CurrentContentLengthMinus1
           ldx   #$00
-LOOP:     lda   #MTCharOverscore
+LOOP:     lda   #MouseText::Overscore
           jsr   OutputCharInWindowAtXY
           inx
           cpx   CurrentContentWidth
@@ -6329,7 +6324,7 @@ DrawWindowRightEdge:
           lda   #CharSpace
           sta   DrawWindowRightEdgeSecondChar
 DrawWindowRightEdge1:
-          lda   #MTCharRightVerticalBar
+          lda   #MouseText::RightVerticalBar
           sta   DrawWindowRightEdgeChar
           lda   #$01
           sta   DrawWindowRightEdgeLoopIndex
@@ -6352,7 +6347,7 @@ DrawHorizScrollBarGrayBarChar:
           .byte $00
 
 .proc DrawHorizScrollBarGrayBar
-          lda   #MTCharCheckerboard1
+          lda   #MouseText::Checkerboard1
           sta   DrawHorizScrollBarGrayBarChar
           ldy   CurrentContentLengthMinus1
           ldx   #$00
@@ -6367,7 +6362,7 @@ LOOP:     lda   #$01
 .endproc
 
 .proc DrawVertScrollBarGrayBar
-          lda   #MTCharCheckerboard1
+          lda   #MouseText::Checkerboard1
           sta   DrawWindowRightEdgeSecondChar
           jmp   DrawWindowRightEdge1
 .endproc
@@ -6375,11 +6370,11 @@ LOOP:     lda   #$01
 ;;; Resize box consists of two characters, but which two depends on
 ;;; properties of the window (whether active, which scroll bars present)
 ResizeBoxChars:
-          .byte MTCharOverscore, CharSpace ; first set
-          .byte MTCharOverscore, MTCharOverscore ; second set
-          .byte MTCharRightVerticalBar, CharSpace ; third set
-          .byte CharInvSpace, MTCharDottedBox     ; fourth set
-          .byte MTCharRightVerticalBar, MTCharDottedBox ; fifth set
+          .byte MouseText::Overscore, CharSpace ; first set
+          .byte MouseText::Overscore, MouseText::Overscore ; second set
+          .byte MouseText::RightVerticalBar, CharSpace ; third set
+          .byte CharInvSpace, MouseText::DottedBox     ; fourth set
+          .byte MouseText::RightVerticalBar, MouseText::DottedBox ; fifth set
 
 ResizeBoxChar1:
           .byte $00
@@ -6519,7 +6514,7 @@ DrawHorizScrollBoxAtPosInA:
           sta   HorizScrollBoxPosition
           ldy   CurrentContentLengthMinus1
           tax
-          lda   #MTCharOverUnderScore
+          lda   #MouseText::OverUnderScore
           jsr   OutputCharInWindowAtXY
 L8D15:    rts
 
@@ -6533,7 +6528,7 @@ DrawVertScrollBoxAtPosInA:
           sta   VertScrollBoxPosition
           ldx   CurrentContentWidthMinus1
           tay
-          lda   #MTCharOverUnderScore
+          lda   #MouseText::OverUnderScore
           jsr   OutputCharInWindowAtXY
 L8D2E:    rts
 
@@ -6545,9 +6540,9 @@ L8D2E:    rts
           txa
           ror   a
           bcs   ODD ; branch if odd column
-          lda   #MTCharCheckerboard2
+          lda   #MouseText::Checkerboard2
           bne   SKIP ; branch always taken
-ODD:      lda   #MTCharCheckerboard1
+ODD:      lda   #MouseText::Checkerboard1
 SKIP:     jsr   OutputCharInWindowAtXY
 OUT:      rts
 .endproc
@@ -6557,7 +6552,7 @@ OUT:      rts
           bpl   OUT ; branch if no
           ldx   CurrentContentWidthMinus1
           ldy   VertScrollBoxPosition
-          lda   #MTCharCheckerboard1
+          lda   #MouseText::Checkerboard1
           jsr   OutputCharInWindowAtXY
 OUT:      rts
 .endproc

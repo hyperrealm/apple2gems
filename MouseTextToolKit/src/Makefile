@@ -3,8 +3,8 @@ disasm:
 	da65 --info info.txt --mnemonic-column 12 --argument-column 18 --comment-column 30 MTXKIT.ABS.bin
 
 asm:
-	ca65 MouseTextToolKit.s -o MTTK.asm -l MTTK.list -t apple2
-	cl65 -o MTTK.obj -t apple2 -C apple.cfg MouseTextToolKit.s
+	ca65 -I ../../asminc -o MTTK.o -t apple2 -l MTTK.list MouseTextToolKit.s
+	ld65 -o MTTK.obj -C apple.cfg MTTK.o
 	diff ../obj/MTXKIT.ABS.bin MTTK.obj
 
 listing:
