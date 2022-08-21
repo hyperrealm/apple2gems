@@ -173,6 +173,14 @@ Q6L             := $C0EC ; (R/W)
 Q6H             := $C0ED ; (R/W)
 Q7L             := $C0EE ; (R/W)
 Q7H             := $C0EF ; (R/W)
-DSBLIOROM       := $CFFF ; (W)
+C8OFF           := $CFFF ; (W)
+
+SLOT1SW         := $C010
+SLOT2SW         := $C020
+SLOT3SW         := $C030
+SLOT4SW         := $C040
+SLOT5SW         := $C050
+SLOT6SW         := $C060
+SLOT7SW         := $C080
 
 .endscope

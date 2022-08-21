@@ -6,6 +6,8 @@ MLI             := $BF00        ; MLI entry point
 SysLoadAddress  := $2000
 SysPathBuf      := $0280
 
+InterpreterID   := $EE  ; ID byte for interpreter programs
+
 ;;; MLI call numbers
 CCREATE         := $C0 ; CREATE
 CDESTROY        := $C1 ; DESTROY
@@ -205,6 +207,7 @@ CWRBLOCK        := $81 ; WRITE_BLOCK
 .endstruct
 
 ;;; ProDOS global page locations
+CLKENTRY        := $BF06 ; Clock driver entry point
 DEVADR0         := $BF10 ; Device driver address table
 DEVNUM          := $BF30 ; Last used device number
 DEVCNT          := $BF31 ; Number of online devices minus 1

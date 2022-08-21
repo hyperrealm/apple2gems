@@ -2,7 +2,7 @@
 
           .include "MouseTextToolKitDefines.s"
           .include "SoftSwitches.s"
-          .include "ProDOSMLI.s"
+          .include "ProDOS.s"
           .include "MouseText.s"
           .include "Mouse.s"
           .include "ControlChars.s"

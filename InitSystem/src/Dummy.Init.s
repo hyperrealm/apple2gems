@@ -1,5 +1,6 @@
 
 .MACPACK generic
+.FEATURE string_escapes
 
 .include "Monitor.s"
 .include "ProDOS.s"
@@ -10,7 +11,7 @@
 
 Init:
         ldx   #0
-@Loop:  lda   Message,X
+@Loop:  lda   MessageText,X
         beq   @Next
         jsr   Monitor::COUT
         inx
@@ -19,14 +20,12 @@ Init:
 @WaitLoop:
         lda   #$FF
         jsr   Monitor::WAIT
-        lda   #'.' | $80
+        lda   #HICHAR('.')
         jsr   Monitor::COUT
         dex
         bne   @WaitLoop
-        jsr   Monitor:: CROUT
+        jsr   Monitor::CROUT
         rts
 
-Message:
-        hiighascii "DUMMY INIT OK"
-        .byte $8D
-        .byte $00
+MessageText:
+        highasciiz "DUMMY INIT OK\r"

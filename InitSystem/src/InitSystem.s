@@ -13,8 +13,9 @@
 ;;; ====================================================================
 
 .MACPACK generic
+.FEATURE string_escapes
 
-.include "ProDOSMLI.s"
+.include "ProDOS.s"
 .include "Monitor.s"
 .include "ZeroPage.s"
 .include "FileTypes.s"
@@ -160,7 +161,7 @@ AppendInitsDir:
         beq   @Done
         sta   PathBuf+1,Y
         inx
-        inx
+        iny
         bra   @Loop
 @Done:  sty   PathBuf ; update path length
         sty   InitPathLen ; save length of inits path
@@ -297,7 +298,7 @@ OpenSysFile:
         nop
         nop
 
-        jsr   Monitor:: HOME ; clear the screen
+        jsr   Monitor::HOME ; clear the screen
         jmp   ProDOS::SysLoadAddress
 
 ;;; ----------------------------------------
@@ -317,7 +318,7 @@ FatalError:
         bra   @Loop
 @Done:  pla   ; restore error
         jsr   Monitor::PRBYTE
-        lda   #' ' | $80
+        lda   #HICHAR(' ')
         jsr   Monitor::COUT
         jsr   Monitor::RDKEY
 
