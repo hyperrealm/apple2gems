@@ -120,4 +120,8 @@ ZMODE       := $FFC7 ; Zero the Monitor mode byte at MONMODE.
 CHRTBL      := $FFCC ; Monitor command character table.
 SUBTL       := $FFE3 ; Monitor command subroutine table.
 
+MAINID      := $FBB3 ; System main ID byte
+SUBID1      := $FBC0 ; System sub-ID #1
+SUBID2      := $FBBF ; System sub-ID #2
+
 .endscope

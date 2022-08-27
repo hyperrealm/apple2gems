@@ -12,7 +12,7 @@ EQUAL       := $D0 ; "="
 GREATERTHAN := $CF ; ">"
 
 ABS         := $D4 ; "ABS"
-AND         := $CD ; "AND"
+AND_        := $CD ; "AND"
 ASC         := $E6 ; "ASC"
 AT          := $C5 ; "AT"
 ATN         := $E1 ; "ATN"
@@ -26,8 +26,8 @@ DATA        := $83 ; "DATA"
 DEF         := $B8 ; "DEF"
 DEL         := $85 ; "DEL"
 DIM         := $86 ; "DIM"
-DRAW        := $94 : "DRAW"
-END         := $80 : "END"
+DRAW        := $94 ; "DRAW"
+END         := $80 ; "END"
 EXP         := $DD ; "EXP"
 FLASH       := $9F ; "FLASH"
 FN          := $C2 ; "FN"
@@ -124,7 +124,7 @@ EQUAL       := $DF6A
 GREATERTHAN := $DF6A
 
 ABS         := $EBAF
-AND         := $DF55
+AND_        := $DF55
 ASC         := $E6E5
 ATN         := $F09E
 CALL        := $F1D5
@@ -339,7 +339,7 @@ BLTU        := $D393 ; Move block of memory.
 
 ;;; Logical and comparsion operators
 
-AND         := $DF55 ; Calculate logical AND of FAC and ARG, store result in FAC.
+AND_        := $DF55 ; Calculate logical AND of FAC and ARG, store result in FAC.
 OR          := $DF4F ; Calculate logical OR of FAC and ARG, store result in FAC.
 NOT         := $DE98 ; Calculate logical NOT of FAC, store result in FAC.
 COMPARE     := $DF6A ; Compare ARG to FAC, using comparison COMPRTYP.
@@ -392,7 +392,7 @@ ISCNTC      := $D858 ; Check if Control-C was pressed; execute break routine if 
 ;;; Text output
 STROUT      := $DB3A ; Print the null- or double-quote-terminated string pointed to by A/Y.
 STRPRT      := $DB3D ; Print the string whose descriptor is in FAC.
-OUTDO       := $DB50 ; Print the character in A.
+OUTDO       := $DB5C ; Print the character in A.
 OUTSPC      := $DB57 ; Print a space.
 OUTQST      := $DB5A ; Print a question mark.
 CRDO        := $DAFB ; Print a carriage return.
