@@ -30,7 +30,7 @@ MOUSTAT     := $0778 ; (+s) Mouse status
 MOUMODE     := $07F8 ; (+s) Mouse mode
 
 
-;;; Mouse slot 0 screen holes.
+;;; Slot 0 mouse screen holes.
 
 MINL        := $0478 ; Clamp min value (low byte)
 MAXL        := $04F8 ; Clamp max value (low byte)
@@ -46,5 +46,12 @@ MAXXL       := $067D ; Clamp X max value (low byte)
 MAXYL       := $06FD ; Clamp Y max value (low byte)
 MAXXH       := $077D ; Clamp X max value (high byte)
 MAXYH       := $07FD ; Clamp Y max value (high byte)
+
+;;; Mouse modes
+
+ModeOnMask                := %00000001
+ModeInterruptOnMoveMask   := %00000010
+ModeInterruptOnButtonMask := %00000100
+ModeInterruptOnVBLMask    := %00001000
 
 .endscope

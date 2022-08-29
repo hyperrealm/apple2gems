@@ -6,21 +6,22 @@
           .include "MouseText.s"
           .include "Mouse.s"
           .include "ControlChars.s"
+          .include "OpCodes.s"
 
           .setcpu "6502"
 
-TextRowBasePtr    := $0000
-EventPtr          := $0002
-EventPtr2         := $0004
-GeneralStorageByte:= $0006
-ReturnAddressPtr  := $0007
-ParamTablePtr     := $0009
-SaveAreaPtr       := $000B
-MenuBarOrWindowPtr:= $000D
-MenuBlockOrDocInfoPtr:= $000F
-MenuStructPtr    := $0011
-MenuItemStructPtr:= $0013
-TextStringPtr    := $0015
+TextRowBasePtr        := $0000
+EventPtr              := $0002
+EventPtr2             := $0004
+GeneralStorageByte    := $0006
+ReturnAddressPtr      := $0007
+ParamTablePtr         := $0009
+SaveAreaPtr           := $000B
+MenuBarOrWindowPtr    := $000D
+MenuBlockOrDocInfoPtr := $000F
+MenuStructPtr         := $0011
+MenuItemStructPtr     := $0013
+TextStringPtr         := $0015
 
           .org   $6100
 
@@ -370,22 +371,22 @@ L6332:    lda   #$00
           pla
           sta   $FBB3 ; restore the machine ID byte
           lda   #$00
-          sta   $0478
-          sta   $0578
+          sta   Mouse::MOUXL
+          sta   Mouse::MOUXH
           lda   MouseUpperClampBoundX
-          sta   $04F8
+          sta   Mouse::MOUYL
           lda   MouseUpperClampBoundX+1
-          sta   $05F8
+          sta   Mouse::MOUYH
           lda   #$00
           ldy   #MouseCall::ClampMouse ; clamp X axis
           jsr   CallMouseFirmware
           lda   #$00
-          sta   $0478
-          sta   $0578
+          sta   Mouse::MOUXL
+          sta   Mouse::MOUXH
           lda   MouseUpperClampBoundY
-          sta   $04F8
+          sta   Mouse::MOUYL
           lda   MouseUpperClampBoundY+1
-          sta   $05F8
+          sta   Mouse::MOUYH
           lda   #$01
           ldy   #MouseCall::ClampMouse ; clamp Y axis
           jsr   CallMouseFirmware
@@ -393,9 +394,9 @@ L6332:    lda   #$00
           jsr   CallMouseFirmware
           bit   InterruptAllocatedFlag
           bmi   L6393
-          lda   #$01 ; mouse on, interrupts off
+          lda   #Mouse::ModeOnMask
           bne   L6395
-L6393:    lda   #$09 ; mouse on, VBL interrupt on
+L6393:    lda   #Mouse::ModeOnMask|Mouse::ModeInterruptOnVBLMask
 L6395:    ldy   #MouseCall::SetMouse ; set mouse mode
           jsr   CallMouseFirmware
           rts
@@ -412,15 +413,15 @@ L6395:    ldy   #MouseCall::SetMouse ; set mouse mode
           ldy   #MouseCall::ReadMouse
           jsr   CallMouseFirmware
           ldx   CallMouseFirmware::MouseSlot_Cs
-          lda   $03B8,x
+          lda   Mouse::MOUXL-$C0,x
           sta   MouseXCoord
-          lda   $04B8,x
+          lda   Mouse::MOUXH-$C0,x
           sta   MouseXCoord+1
-          lda   $0438,x
+          lda   Mouse::MOUYL-$C0,x
           sta   MouseYCoord
-          lda   $0538,x
+          lda   Mouse::MOUYH-$C0,x
           sta   MouseYCoord+1
-          lda   $06B8,x
+          lda   Mouse::MOUSTAT-$C0,x
           sta   MouseButtonState
           ldx   MouseXScaleFactor ; scale mouse coordinates
 L63CB:    lsr   MouseXCoord+1 ; to screen coordinates
@@ -470,13 +471,13 @@ L641B:    asl   MousePosYScaledUp
           bne   L641B
           ldx   CallMouseFirmware::MouseSlot_Cs
           lda   MousePosXScaledUp
-          sta   $03B8,x
+          sta   Mouse::MOUXL-$C0,x
           lda   MousePosXScaledUp+1
-          sta   $04B8,x
+          sta   Mouse::MOUXH-$C0,x
           lda   MousePosYScaledUp
-          sta   $0438,x
+          sta   Mouse::MOUYL-$C0,x
           lda   MousePosYScaledUp+1
-          sta   $0538,x
+          sta   Mouse::MOUYH-$C0,x
           ldy   #MouseCall::PosMouse
           jsr   CallMouseFirmware
 L6444:    plp
@@ -690,7 +691,7 @@ L658C:    lda   (ParamTablePtr),y ; copies the hook address from the param table
           ora   (EventPtr2),y
           bne   L659F          ; Branch if the address is null
           dey                  ; Y is now 1
-          lda   #$90           ; Copies BCC instruction
+          lda   #OpCode::BCC_Rel ; Copies BCC instruction
           sta   (EventPtr2),y  ; to (EventPtr2)+1
 L659F:    lda   L65AE,y        ; Copies SEC or JSR instruction
           ldy   #$00
@@ -701,8 +702,8 @@ L65A8:    lda   #ErrInvalidUserHookID
           sta   LastError
           plp
 L65AE:    rts
-          .byte $38 ; SEC instruction
-          .byte $20 ; JSR instruction
+          .byte OpCode::SEC_Imp
+          .byte OpCode::JSR_Abs
 .endproc
 
 CheckEventsHookCallSites:

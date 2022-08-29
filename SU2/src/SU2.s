@@ -13,10 +13,12 @@
 
         .include "Applesoft.s"
         .include "BASICSystem.s"
+        .include "Columns80.s"
         .include "ControlChars.s"
         .include "Macros.s"
         .include "MemoryMap.s"
         .include "Monitor.s"
+        .include "OpCodes.s"
         .include "ProDOS.s"
         .include "SoftSwitches.s"
         .include "Vectors.s"
@@ -67,15 +69,16 @@ ResidentCode := *
 
 MainCodeStart := *
 
-OLDCH := $047B
-OURCH := $057B
-
+;;; &INPUT Status codes returned in EX variable.
 ExitStatusReturnPressed     := $01
 ExitStatusEscPressed        := $02
 ExitStatusOpenApplePressed  := $03
 ExitStatusSolidApplePressed := $04
 
-IOBufferLength := $A0
+;;; Constants
+IOBufferLength  := $A0
+CursorChar      := HICHAR('_')
+DefaultFillChar := ' '
 
 ;;;  Zero page usage:
 VarPtr       := $FA
@@ -91,8 +94,7 @@ Install:
 AmperAddr: .addr EntryPoint
 PrevAmperAddr:
            .addr $0000
-
-L8BE0:     .byte $00            ; never read
+SysIDVal:  .byte $00 ; Some kid of system identifier; never read.
 IIeOrNewerFlag:
            .byte $00
 OriginalTXTPTR:
@@ -109,31 +111,34 @@ OASAVarPtr:
 PRINTOutputCharCount:
            .byte $0000
 
-           .byte $00            ; unused
+           .byte $00 ; unused
 
 CharsLeftInOutputLine:
            .byte $00
-
 SavedCHForPrint:
            .byte $00
-CHDuringPrintOutput:
+CHDuringPRINTOutput:
            .byte $00
-
-L8BEF:     .byte $00            ; another storage for CH?
-L8BF0:     .byte $00            ; another storage for CH? (during PRINT)
-L8BF1:     .byte $00            ; ???
-
-WordWrapSavedChar:              ; SHOULD BE +1
+TempCHStorage:
+           .byte $00 ; Used to temporarily save CH in PRINTHandler.
+TempCHValue:
+           .byte $00 ; Used to do some mystery CH calculations in
+                     ; PRINTHandler.
+TempValue: .byte $00 ; Used to temporarily hold typed char in
+                     ; InsertTypedCharIntoBuffer; used to record whether
+                     ; CH has been saved in ConsumeOutputChar; also used
+                     ; to do some mystery CH calculations in PRINTHandler.
+WordWrapSavedChar:
            .byte $00
 ConvertToUpperCaseFlag:
-           .byte $00            ; some kind of flag; $00 or $80
+           .byte $00            ; $00 or $80
 ConsumeOutputCharSavedY:
            .byte $00            ; storage for Y in ConsumeOutputChar
-UnusedBytes2:
-           .byte $00,$00,$00,$00,$00,$00 ; unused?
+
+           .byte $00,$00,$00,$00,$00,$00 ; unused
+
 SavedCV:   .byte $00
 SavedCH:   .byte $00
-
 SavedCV2:  .byte $00            ; copy of ZeroPage::CV ; never read
 ZeroPageStorage:
            .byte $00,$00,$00,$00,$00,$00,$00
@@ -143,12 +148,13 @@ CharUnderCursor:
            .byte $00
 CursorIsVisible:
            .byte $00            ; $01 if visible, $00 if not
-UnusedBytes3:
-           .byte $00,$00        ; unused?
+
+           .byte $00,$00 ; unused
+
 SavedARYTAB:
            .addr $0000          ; written, but never read
 SavedBAtoBC:
-           .byte $00, $00, $00  ; storage for $BA..$BC, in CHRGOT
+           .byte $00,$00,$00    ; storage for $BA..$BC, in CHRGOT
 TextWindowZPStorage2:           ; saves $20-$29
            .byte $00,$00,$00,$00,$00,$00,$00,$00
            .byte $00,$00
@@ -157,14 +163,16 @@ TextWindowZPStorage:            ; saves $20-$29
            .byte $00,$00
 SkipClearingInputBufferFlag:
            .byte $00            ; $00 or $01
-UnusedByte1:
-           .byte $00            ; unused?
+
+           .byte $00 ; unused
+
 UnlimitedInputLengthFlag:
            .byte $00            ;set if  FL = 0
 AlwaysZeroByte4:
            .byte $00            ; read, but never written
-UnusedByte2:
-           .byte $00            ; unused?
+
+           .byte $00 ; unused
+
 CharTyped:
            .byte $00
 InputStringPtr:
@@ -186,14 +194,14 @@ CTVarPtr:
 EXVarPtr:
            .addr $0000
 AlwaysZeroPtr:
-           .addr $0000    ; some variable ptr that's read, but never written
+           .addr $0000  ; a variable ptr that's read, but never written
 IgnoreDefaultInputFlag:
            .byte $00    ; $01 = don't use default input when displaying
 UsingCHRGETInterceptorFlag:
            .byte $00    ; only $00 ever gets written here
-FillChar:  .byte $00
+FillChar:  .byte $00    ; Fill character read from FL$, defaults to space
 MaxInputLength:
-           .byte $00
+           .byte $00    ; Max input length read from FL.
 AlwaysZeroByte2:
            .byte $00    ; $00 stored here; never read
 AlwaysZeroByte3:
@@ -204,23 +212,24 @@ CurrentInputLength:
            .byte $00
 AppleKeyFlag:
            .byte $00    ; $01 = open apple, $00 = solid apple
-UnusedBytes:
+
            .byte $00,$00,$00,$00 ; unused
-SavedA:    .byte $00
-SavedY:    .byte $00
-SavedX:    .byte $00
-UnusedBytes5:
+
+SavedA:    .byte $00    ; Storage for Accumulator
+SavedY:    .byte $00    ; Storage for Y Register
+SavedX:    .byte $00    ; Storage for X Register
+
            .byte $00,$00,$00    ; unused
+
 AlwaysZeroByte5:
            .byte $00            ; $00 stored here; never read
 BufferAddr:
-           .addr IOBuffer
-ExitValue: .byte $00            ; $01, $02, or $04 gets written here
+           .addr IOBuffer       ; Address of input/output buffer
+ExitValue: .byte $00            ; Holds the &INPUT status code
 
-;;;  unused garbage
-           .byte $07,$5A,$8C,$49,$44,$00,$5F
-           .byte $8C,$47,$49,$00,$64,$8C,$57,$49
-           .byte $00
+;;; Garbage bytes
+           .byte $07,$5A,$8C,$49,$44,$00,$5F,$8C
+           .byte $47,$49,$00,$64,$8C,$57,$49,$00
 
 VariableTableAddr:
             .addr VariableTable
@@ -230,7 +239,7 @@ VariableTable:
            .asciiz "SO$"
            .asciiz "SA"
            .asciiz "ES"
-           .asciiz "CT"         ; this variable is never used
+           .asciiz "CT"
            .asciiz "FL$"
            .asciiz "FL"
            .asciiz "EX"
@@ -317,11 +326,11 @@ CheckForEndOfStatement:
            ldx   #ApplesoftError::SyntaxError
            jmp   ApplesoftRoutine::ERROR
 L8D3C:     lda   UsingCHRGETInterceptorFlag
-           beq   L8D4F          ; branch always taken
+           beq   L8D4F ; branch always taken
 
 ;;; The code immediately following the LDA TXTPTR instruction in CHRGOT is
 ;;; overwritten with a JMP to CHRGETInterceptor.
-           lda   #$4C           ; JMP instruction
+           lda   #OpCode::JMP_Abs
            sta   $BA
            lda   CHRGETInterceptorAddr
            sta   $BB
@@ -356,15 +365,15 @@ SetCHModulo80:
            bcc   L8D80
            sbc   #80
            jmp   SetCHModulo80
-L8D80:     sta   OURCH
+L8D80:     sta   Columns80::OURCH
            lda   #$00
            sta   ZeroPage::CH
-           sta   OLDCH
+           sta   Columns80::OLDCH
            rts
 
 INPUTHandler:
            lda   UsingCHRGETInterceptorFlag
-           beq   L8D95          ; branch always taken
+           beq   L8D95 ; branch always taken
            ldx   #ApplesoftError::SyntaxError
            jmp   ApplesoftRoutine::ERROR
 L8D95:     lda   #$00
@@ -474,7 +483,7 @@ L8E90:     cmp   #ExitStatusSolidApplePressed
            ldx   SAVarPtr
            jsr   StoreAInVarAtYX
            jmp   L8EAF
-L8EA2:     cmp   #$05           ; useless comparison
+L8EA2:     cmp   #$05 ; useless comparison
            lda   #$01
            ldy   CTVarPtr+1
            ldx   CTVarPtr
@@ -516,14 +525,14 @@ InputChar:
            jsr   HideCursor
            rts
 
-           rts
+           rts   ; unreachable instruction
 
 PRINTHandler:
            jsr   ClampTextWindowWidth
            lda   #$00
            sta   PRINTOutputCharCount
            sta   PRINTOutputCharCount+1
-L8F07:     sta   L8BF1
+L8F07:     sta   TempValue
            lda   ZeroPage::CH
            sta   SavedCHForPrint
            lda   BufferAddr
@@ -539,34 +548,34 @@ L8F07:     sta   L8BF1
            lda   #>ConsumeOutputChar
            sta   ZeroPage::CSW+1
            jsr   ApplesoftHandler::PRINT-3
-           lda   #>IOBuffer ; value may have been modified by ConsumeOutputChar
-           sta   Pointer+1  ; so restore it
+           lda   #>IOBuffer ; value may have been modified by
+           sta   Pointer+1  ;   ConsumeOutputChar, so restore it
            lda   ZeroPage::CH
-           sta   L8BEF
+           sta   TempCHStorage
            lda   SavedCSW
            sta   ZeroPage::CSW
            lda   SavedCSW+1
            sta   ZeroPage::CSW+1
-           bit   L8BF1
+           bit   TempValue
            bmi   L8F64
            sec
-           ror   L8BF1
+           ror   TempValue
            clc
            lda   SavedCHForPrint
-           ldy   CHDuringPrintOutput
+           ldy   CHDuringPRINTOutput
            beq   L8F58
-           and   #$F0
-           adc   CHDuringPrintOutput
+           and   #%11110000 ; Why???
+           adc   CHDuringPRINTOutput
 L8F58:     sta   ZeroPage::CH
            sec
-           lda   L8BEF
-           sbc   CHDuringPrintOutput
-           sta   L8BF0
+           lda   TempCHStorage
+           sbc   CHDuringPRINTOutput
+           sta   TempCHValue
 L8F64:     jsr   AdvanceOutputToCH
            ldy   #$00
            sty   OASAVarPtr
            sty   OASAVarPtr+1
-           sty   L8BF1
+           sty   TempValue
 L8F72:     lda   (Pointer),y
            cmp   #HICHAR(' ')
            bne   L8F95
@@ -608,23 +617,23 @@ L8FB7:     sta   WordWrapSavedChar
            bcc   L8FD0
            beq   L8FD0
            bne   L8FCD
-           ror   L8BF1
+           ror   TempValue
            bne   L8FD0
 L8FCD:     jsr   StartNewOutputLine
 L8FD0:     ldy   #$00
 L8FD2:     lda   (Pointer),y
-           cmp   #$E0
+           cmp   #HICHAR('`')
            bcs   L8FE3
            bit   ConvertToUpperCaseFlag
            bmi   L8FE3
-           cmp   #$C0
+           cmp   #HICHAR('@')
            bcc   L8FE3
-           and   #$DF
+           and   #%11011111
 L8FE3:     jsr   ApplesoftRoutine::OUTDO
            dec   CharsLeftInOutputLine
            bne   L8FFA
            lda   WordWrapSavedChar
-           cmp   #$A0
+           cmp   #HICHAR(' ')
            bne   L8FF7
            iny
            bne   L8FF7
@@ -649,10 +658,10 @@ L8FFA:     jsr   DecrementPRINTOutputCharCount
            bne   L9021
            inc   Pointer+1
 L9021:     jsr   StartNewOutputLineNoCR
-L9024:     bit   L8BF1
+L9024:     bit   TempValue
            bpl   L902D
            clc
-           ror   L8BF1
+           ror   TempValue
 L902D:     clc
            lda   Pointer
            adc   OASAVarPtr
@@ -670,17 +679,16 @@ L9048:     lda   ZeroPage::CH
            cmp   ZeroPage::WNDLFT
            beq   L9053
            jsr   ApplesoftRoutine::CRDO
-L9053:     lda   L8BF0
+L9053:     lda   TempCHValue
            beq   L9068
            clc
            jsr   GetHorizCursorPos
-           and   #$F0
-           adc   L8BF0
-           and   #$F0
+           and   #%11110000  ; Why??? Some kind of firmware bug
+           adc   TempCHValue ; workaround?
+           and   #%11110000
            sta   ZeroPage::CH
            jsr   AdvanceOutputToCH
 L9068:     jmp   CheckForEndOfStatement
-
 
 ;;; While CH/OURCH is > window width, output carriage return
 ;;; and decrement CH/OURCH by window width
@@ -689,7 +697,7 @@ AdvanceOutputToCH:
            bcs   @Is80Col
            lda   ZeroPage::CH
            jmp   @Loop
-@Is80Col:  lda   OURCH
+@Is80Col:  lda   Columns80::OURCH
 @Loop:     cmp   ZeroPage::WNDWDTH
            bcc   L9086
            sbc   ZeroPage::WNDWDTH
@@ -709,12 +717,12 @@ L9086:     sta   ZeroPage::CH
 ;;; writing to subsequent memory pages beyond the end of it.
 ConsumeOutputChar:
            sty   ConsumeOutputCharSavedY
-           bit   L8BF1
+           bit   TempValue
            bmi   L90A2
            sec
-           ror   L8BF1
+           ror   TempValue
            ldy   ZeroPage::CH
-           sty   CHDuringPrintOutput
+           sty   CHDuringPRINTOutput
 L90A2:     ldy   PRINTOutputCharCount
            sta   (Pointer),y
            iny
@@ -767,20 +775,23 @@ ClampTextWindowWidth:
            sta   ZeroPage::WNDWDTH
 @Out:      rts
 
+;;; Also sets ConvertToUpperCaseFlag if the system is not a IIe or
+;;; newer.
 GetHorizCursorPos:
            ldx   #$00
            lda   Monitor::MAINID
            cmp   #$06
-           bne   L910B
+           bne   L910B ; Branch if not IIe or newer
            ldx   #$80
            bit   Monitor::SUBID1
-           bpl   L910B
-           lda   OURCH
-           bcs   L910D
+           bpl   L910B ; Branch if IIc or IIc+
+           lda   Columns80::OURCH
+           bcs   L910D ; Branch if not IIc or IIc+
 L910B:     lda   ZeroPage::CH
 L910D:     stx   ConvertToUpperCaseFlag
            rts
 
+;;; Restores old ampersand vector and releases buffer(s).
 EXITHandler:
            lda   PrevAmperAddr
            sta   Vector::AMPERV+1
@@ -789,6 +800,7 @@ EXITHandler:
            jsr   BASICSystem::FREEBUFR
            rts
 
+;;; Returns text window width in A, and sets Carry if in 80-column mode.
 GetWindowAndScreenWidth:
            lda   SoftSwitch::RD80VID
            asl   a
@@ -1050,8 +1062,8 @@ HandleAcceptInputWithExitValueInA:
            jmp   ControlCharHandled
 
 ;;; This apparently clears the first two bytes of the data field of
-;;; the variable pointed by VarPtr. It's always called with A=0, on both
-;;; floating point and string variables.
+;;; the floating point variable pointed by VarPtr. It's always called with
+;;; A = 0.
 ClearVariable:
            stx   VarPtr+1
            sty   VarPtr
@@ -1063,10 +1075,10 @@ ClearVariable:
            rts
 
 StoreAInVarAtYX:
-           stx   VarPtr+1            ; save X and Y
+           stx   VarPtr+1
            sty   VarPtr
            jsr   ApplesoftRoutine::FLOAT ; convert A to value in FAC
-           ldx   VarPtr+1            ; restore X and Y
+           ldx   VarPtr+1
            ldy   VarPtr
            jsr   ApplesoftRoutine::MOVMF ; copy value in FAC to variable
            rts
@@ -1196,6 +1208,9 @@ L9427:     lda   #$00
            sec
            rts
 
+;;; Skips over whitespace. Returns with Carry set and next token in A
+;;; if a comma was read. Returns with Carry clear and A set to 0 if the
+;;; end of statement (colon) or end of program line was encountered.
 CheckForEndOfStatementOrComma:
            jsr   ApplesoftRoutine::CHRGOT
            cmp   #','
@@ -1227,7 +1242,7 @@ L944F:     lda   ZeroPage::WNDLFT,y
            bne   L944F
            jsr   GetWindowAndScreenWidth
            bcc   L9466
-           lda   OURCH
+           lda   Columns80::OURCH
            ldy   #$04
            sta   TextWindowZPStorage,y ; update CH
 L9466:     rts
@@ -1269,9 +1284,9 @@ CheckForControlChars:
            jsr   ClearInputBuffer
 @SkipClear:
            lda   CharTyped
-           and   #$7F
+           and   #%01111111
            sec
-           sbc   #$20
+           sbc   #' '
            bcs   @NotControlChar
            jsr   Beep
            clc
@@ -1305,8 +1320,8 @@ L94ED:     sta   ZeroPage::CH
            jmp   ReturnWithCarrySet
 L94FA:     lda   CurrentInputLength
            clc
-           adc   OURCH
-L9500:     sta   OURCH
+           adc   Columns80::OURCH
+L9500:     sta   Columns80::OURCH
            sec
            sbc   ZeroPage::WNDWDTH
            beq   ReturnWithCarrySet
@@ -1349,7 +1364,7 @@ LookUpVariables:
            ldy   #$00
            lda   (ZeroPage::VARPNT),y
            bne   L956F
-           lda   #' '           ; default fill character
+           lda   #DefaultFillChar
            jmp   L957D
 L956F:     iny
            lda   (ZeroPage::VARPNT),y
@@ -1420,7 +1435,7 @@ L95EF:     lda   #$00
            lda   IIeOrNewerFlag
            bne   L960B
            lda   IOBuffer,y
-L9606:     and   #$7F
+L9606:     and   #%01111111
            jmp   L960E
 L960B:     lda   IOBuffer,y
 L960E:     iny
@@ -1508,7 +1523,7 @@ InsertTypedCharIntoBuffer:
            ldx   IgnoreDefaultInputFlag
            beq   L96BC
            jsr   CharToUppercase
-L96BC:     sta   L8BF1
+L96BC:     sta   TempValue
            lda   CurrentInputPos
            cmp   MaxInputLength
            bne   L96CA
@@ -1538,7 +1553,7 @@ L96F5:     lda   IOBuffer,y
            dey
            dec   WordWrapSavedChar
            bne   L96F5
-           lda   L8BF1
+           lda   TempValue
            ldy   CurrentInputPos
            sta   IOBuffer,y
            cpy   MaxInputLength
@@ -1587,7 +1602,7 @@ CopyIOBUfferIntoString:
            ldy   #$00
            lda   (ZeroPage::VARPNT),y
            sta   StringLength
-           inc   StringLength
+           inc   StringLength ; this instruction is a bug (should remove)
            iny
            lda   (ZeroPage::VARPNT),y
            sta   Pointer
@@ -1684,9 +1699,9 @@ RestoreSwappedTextWindowZPLocations:
            bcc   @Out
            ldy   #$04
            lda   TextWindowZPStorage2,y ; CH value
-           sta   OURCH
+           sta   Columns80::OURCH
            lda   #$00
-           sta   OLDCH
+           sta   Columns80::OLDCH
            sta   ZeroPage::CH
 @Out:      rts
 
@@ -1705,10 +1720,10 @@ SwapTextWindowZPLocations:
            jsr   GetWindowAndScreenWidth
            bcc   @Out
            ldy   #$04
-           lda   OURCH
+           lda   Columns80::OURCH
            sta   TextWindowZPStorage2,y
            lda   TextWindowZPStorage,y
-           sta   OURCH
+           sta   Columns80::OURCH
 @Out:      rts
 
 IOBufferToUppercase:            ; never called
@@ -1722,7 +1737,7 @@ IOBufferToUppercase:            ; never called
            jmp   @Loop
 @Out:      rts
 
-           ldy   OASAVarPtr+1          ; unreachable instruction?
+           ldy   OASAVarPtr+1 ; unreachable instruction
 
 RestoreBAtoBC:
            lda   SavedBAtoBC
@@ -1824,7 +1839,7 @@ L98D2:     sta   BlinkCounter
 L98E3:     lda   IOBuffer,y
            sta   CharUnderCursor
            ldy   #$01
-           lda   #HICHAR('_')
+           lda   #CursorChar
 L98ED:     sty   CursorIsVisible
            ldy   CurrentInputPos
            cpy   MaxInputLength
@@ -1855,7 +1870,7 @@ IsInBottomRightCornerOfTextWindow:
            bcc   @Is40Col
            cld
            sbc   #$01
-           cmp   OURCH
+           cmp   Columns80::OURCH
            bne   L993E
            sec
            rts
@@ -1897,19 +1912,19 @@ SystemChecks:
            ror   a              ; 80 col card present into C
            bcc   L996B          ; branch if not present
            ldx   #$64           ; 100
-L996B:     stx   L8BE0
+L996B:     stx   SysIDVal
            lda   ProDOS::MACHID
            ror   a
            ror   a
            ror   a
            ror   a
-           and   #$03           ; memory size (1 = 48K, 2 = 64K, 3 = 128K)
+           and   #%00000011     ; memory size (1 = 48K, 2 = 64K, 3 = 128K)
            tax
            dex
            lda   L99BC,x        ; 48K -> 0, 64K -> 10, 128K -> 20
            clc
-           adc   L8BE0
-           sta   L8BE0
+           adc   SysIDVal
+           sta   SysIDVal
            lda   #$08
            bit   ProDOS::MACHID ; bit 7 is 1 if IIe or newer
            bne   L999C          ; branch if not II
@@ -1917,20 +1932,20 @@ L996B:     stx   L8BE0
            rol   a
            rol   a
            rol   a
-           and   #$03           ; get bits 4 and 3; 3 will be 0
+           and   #%00000011     ; get bits 4 and 3; 3 will be 0
            clc
-           adc   L8BE0
-           sta   L8BE0
+           adc   SysIDVal
+           sta   SysIDVal
            jmp   L99AB
 L999C:     bpl   L99A3          ; not II
            lda   #$04
            jmp   L99A5
 L99A3:     lda   #$05
-L99A5:     adc   L8BE0
-           sta   L8BE0
+L99A5:     adc   SysIDVal
+           sta   SysIDVal
 L99AB:     ldy   #$01
            lda   ProDOS::MACHID
-           and   #$C0           ; get bits 7 and 6
+           and   #%11000000     ; get bits 7 and 6
            cmp   #$80           ; not Apple III?
            beq   L99B8
            ldy   #$00           ; Apple III
