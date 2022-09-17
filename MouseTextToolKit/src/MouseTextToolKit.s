@@ -7,6 +7,7 @@
           .include "Mouse.s"
           .include "ControlChars.s"
           .include "OpCodes.s"
+          .include "Monitor.s"
 
           .setcpu "6502"
 
@@ -145,55 +146,55 @@ DeskTopStartedFlag:
 
 ;;; Dispatch Table
 DispatchTable:
-          .word StartDeskTop-1     ; 00
-          .word StopDeskTop-1      ; 01
-          .word SetCursor-1        ; 02
-          .word ShowCursor-1       ; 03
-          .word HideCursor-1       ; 04
-          .word CheckEvents-1      ; 05
-          .word GetEvent-1         ; 06
-          .word FlushEvents-1      ; 07
-          .word SetKeyEvent-1      ; 08
-          .word InitMenu-1         ; 09
-          .word SetMenu-1          ; 0A
-          .word MenuSelect-1       ; 0B
-          .word MenuKey-1          ; 0C
-          .word HiliteMenu-1       ; 0D
-          .word DisableMenu-1      ; 0E
-          .word DisableMenuItem-1  ; 0F
-          .word CheckMenuItem-1    ; 10
-          .word PascIntAdr-1       ; 11
-          .word SetBasAdr-1        ; 12
-          .word Version-1          ; 13
-          .word SetMark-1          ; 14
-          .word PeekEvent-1        ; 15
-          .word InitWindowMgr-1    ; 16
-          .word OpenWindow-1       ; 17
-          .word CloseWindow-1      ; 18
-          .word CloseAllWindows-1  ; 19
-          .word FindWindow-1       ; 1A
-          .word FrontWindow-1      ; 1B
-          .word SelectWindow-1     ; 1C
-          .word TrackGoAway-1      ; 1D
-          .word DragWindow-1       ; 1E
-          .word GrowWindow-1       ; 1F
-          .word WindowToScreen-1   ; 20
-          .word ScreenToWindow-1   ; 21
-          .word WinChar-1          ; 22
-          .word WinString-1        ; 23
-          .word WinBlock-1         ; 24
-          .word WinOp-1            ; 25
-          .word WinText-1          ; 26
-          .word FindControl-1      ; 27
-          .word SetCtlMax-1        ; 28
-          .word TrackThumb-1       ; 29
-          .word UpdateThumb-1      ; 2A
-          .word ActivateCtl-1      ; 2B
-          .word ObscureCursor-1    ; 2C
-          .word GetWinPtr-1        ; 2D
-          .word PostEvent-1        ; 2E
-          .word SetUserHook-1      ; 2F
-          .word KeyboardMouse-1    ; 30
+          .addr StartDeskTop-1     ; 00
+          .addr StopDeskTop-1      ; 01
+          .addr SetCursor-1        ; 02
+          .addr ShowCursor-1       ; 03
+          .addr HideCursor-1       ; 04
+          .addr CheckEvents-1      ; 05
+          .addr GetEvent-1         ; 06
+          .addr FlushEvents-1      ; 07
+          .addr SetKeyEvent-1      ; 08
+          .addr InitMenu-1         ; 09
+          .addr SetMenu-1          ; 0A
+          .addr MenuSelect-1       ; 0B
+          .addr MenuKey-1          ; 0C
+          .addr HiliteMenu-1       ; 0D
+          .addr DisableMenu-1      ; 0E
+          .addr DisableMenuItem-1  ; 0F
+          .addr CheckMenuItem-1    ; 10
+          .addr PascIntAdr-1       ; 11
+          .addr SetBasAdr-1        ; 12
+          .addr Version-1          ; 13
+          .addr SetMark-1          ; 14
+          .addr PeekEvent-1        ; 15
+          .addr InitWindowMgr-1    ; 16
+          .addr OpenWindow-1       ; 17
+          .addr CloseWindow-1      ; 18
+          .addr CloseAllWindows-1  ; 19
+          .addr FindWindow-1       ; 1A
+          .addr FrontWindow-1      ; 1B
+          .addr SelectWindow-1     ; 1C
+          .addr TrackGoAway-1      ; 1D
+          .addr DragWindow-1       ; 1E
+          .addr GrowWindow-1       ; 1F
+          .addr WindowToScreen-1   ; 20
+          .addr ScreenToWindow-1   ; 21
+          .addr WinChar-1          ; 22
+          .addr WinString-1        ; 23
+          .addr WinBlock-1         ; 24
+          .addr WinOp-1            ; 25
+          .addr WinText-1          ; 26
+          .addr FindControl-1      ; 27
+          .addr SetCtlMax-1        ; 28
+          .addr TrackThumb-1       ; 29
+          .addr UpdateThumb-1      ; 2A
+          .addr ActivateCtl-1      ; 2B
+          .addr ObscureCursor-1    ; 2C
+          .addr GetWinPtr-1        ; 2D
+          .addr PostEvent-1        ; 2E
+          .addr SetUserHook-1      ; 2F
+          .addr KeyboardMouse-1    ; 30
 
 ;;; Param Table Specs Flags
 ParamSpecsTable:
@@ -362,14 +363,14 @@ L6332:    lda   #$00
           sta   MouseXCoord
           sta   MouseYCoord
           sta   MouseButtonState ; reset mouse location and button state
-          lda   $FBB3
+          lda   Monitor::MAINID
           pha
           lda   #$06
-          sta   $FBB3 ; temporarily set the machine ID byte if LCRAM is on
+          sta   Monitor::MAINID ; temporarily set the machine ID byte if LCRAM is on
           ldy   #MouseCall::InitMouse
           jsr   CallMouseFirmware
           pla
-          sta   $FBB3 ; restore the machine ID byte
+          sta   Monitor::MAINID ; restore the machine ID byte
           lda   #$00
           sta   Mouse::MOUXL
           sta   Mouse::MOUXH
@@ -456,7 +457,7 @@ MousePosYScaledUp:
           bcs   L6444  ; branch if > max col
 L63FF:    sta   MousePosXScaledUp
           lda   MouseYCoord
-          cmp   #$18 ; 24 (last row)
+          cmp   #24 ; last row
           bcs   L6444 ; branch if >= max row
           sta   MousePosYScaledUp
           ldx   MouseXScaleFactor ; scale from screen coordinates
@@ -569,12 +570,12 @@ L64AA:    sta   InterruptAllocatedFlag
           bne   L64BC ; 80 columns mode
           sta   Columns80Flag
           sta   SoftSwitch::CLR80VID
-          lda   #$27 ; 39
+          lda   #39
           bne   L64C6 ; branch always taken
 L64BC:    lda   #$80
           sta   Columns80Flag
           sta   SoftSwitch::SET80VID
-          lda   #$4F ; 79
+          lda   #79
 L64C6:    sta   MaxColumnNumber
           lda   #$01
           sta   TemporaryParamTable ; reset user hooks to NULL
@@ -4325,7 +4326,7 @@ L7D99:    sta   MinWindowYCoord
           bmi   L7DB4 ; branch if it's < min y-coord
           cmp   #$19 ; 25
           bmi   L7DC0 ; branch if it's <= max row
-L7DB0:    lda   #$18 ; set y-coord to max row
+L7DB0:    lda   #24 ; set y-coord to max row
           bne   L7DB7 ; branch always taken
 L7DB4:    lda   MinWindowYCoord
 L7DB7:    ldy   #$06
@@ -4511,7 +4512,7 @@ L7ECD:    lda   #TrackingModeNone
           cpx   MaxColumnNumber
           beq   L7F1F
           bcs   OUT ; x > max col? return with failure
-L7F1F:    cpy   #$18
+L7F1F:    cpy   #24
           bcs   OUT ; y >= max row? return with failure
           cpx   MouseXCoord
           bne   L7F2D
@@ -5391,7 +5392,7 @@ LOOP:     sta   WindowTextBlockStartX,x
           stx   DesktopMinXCoord
           inx   ; plus 1 to exclude the menu bar
           stx   DesktopMinYCoord
-          ldx   #$18 ; 24
+          ldx   #24
           stx   DesktopMaxYCoordPlus1
           ldx   MaxColumnNumber
           inx
@@ -5746,7 +5747,7 @@ ColumnFlags:
           ldx   #$00
 LOOP1:    sta   ColumnFlags,x ; set all flags initially
           inx
-          cpx   #$50
+          cpx   #80
           bcc   LOOP1
           bit   RedrawingAllWindowsFlag
           bmi   OUT ; return if yes

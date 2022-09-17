@@ -79,6 +79,8 @@ CWRBLOCK        := $81 ; WRITE_BLOCK
         blocks_used    .word
         mod_date       .word
         mod_time       .word
+        create_date    .word
+        create_time    .word
 .endstruct
 
 .struct OnLineParams
@@ -235,7 +237,9 @@ EINTBLFULL      := $25 ; Interrupt table full
 EIO             := $27 ; I/O error
 ENODEVCONN      := $28 ; No device connected
 EWRITEPROT      := $2B ; Disk write-protected
+EBADBLOCK       := $2D ; Bad block on disk
 EDISKSW         := $2E ; Disk switched
+NODISK          := $2F ; No disk in drive
 EBADPATH        := $40 ; Invalid pathname
 EMAXFILES       := $42 ; Maximum number of files open
 EBADREFNUM      := $43 ; Invalid reference number
@@ -257,5 +261,17 @@ EVOLBLKFULL     := $55 ; Volume control block full
 EBADBUF         := $56 ; Bad buffer address
 EDUPVOL         := $57 ; Duplicate volume
 EFILEDAMAG      := $5A ; File structure damaged
+
+.enum StorageType
+        DeletedFile     = $00
+        Seedling        = $01
+        Sapling         = $02
+        Tree            = $03
+        PascalArea      = $04
+        ExtendedFile    = $05
+        Directory       = $0D
+        SubdirHeader    = $0E
+        VolumeDirHeader = $0F
+.endEnum
 
 .endscope

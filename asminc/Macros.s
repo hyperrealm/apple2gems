@@ -19,3 +19,9 @@
         .byte .strlen(s), s
 .endmacro
 
+.macro msb1pstring s
+        .byte .strlen(s)
+        .repeat .strlen(s), i
+                .byte .strat(s,i) | $80
+        .endrepeat
+.endmacro

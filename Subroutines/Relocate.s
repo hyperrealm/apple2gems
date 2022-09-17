@@ -10,6 +10,10 @@
 
 ;;; Zero Page usage.
 
+PageDelta     := $06 ; relocation page offset
+CurrentAddr   := ZeroPage::A1 ; Current address (for relocation loop)
+EndAddr       := ZeroPage::A2 ; End address of block
+OrigEndAddr   := ZeroPage::A3 ; End address of original code
 
 ;;; Input: target page in A, length of code in X (lo), Y (hi)
 ;;; Source address assumed to be $2000
@@ -18,10 +22,6 @@
 
 .proc Relocate
 
-PageDelta     := $06 ; relocation page offset
-CurrentAddr   := Monitor::A1L ; Current address (for relocation loop)
-EndAddr       := Monitor::A2L ; End address of block
-OrigEndAddr   := Monitor::A3L ; End address of original code
 OrigStartPage := $20
 
         stx   OrigEndAddr
@@ -61,11 +61,11 @@ Loop:
 ;;; Load opcode, check if length is 3...if not, no relocation needed.
         lda   (CurrentAddr)
         jsr   Monitor::INSDS2
-        lda   ZeroPage::LENGTH
-        cmp   #3
+        lda   ZeroPage::OPCODELEN  ; instruction length - 1
+        cmp   #2                ; absolute mode?
         bne   NextInstruction
 
-        pha   ; save instruction length
+        pha   ; save instruction length - 1
 
         ldy   #1
         lda   (CurrentAddr),Y
@@ -81,12 +81,12 @@ Loop:
         sta   (CurrentAddr),Y
 
 NoRelocate:
-        pla   ; restore instruction length
+        pla   ; restore instruction length - 1
 
-;;; Advance CurrentAddr by A (length of instruction)
+;;; Advance CurrentAddr by A + 1 (length of instruction)
 
 NextInstruction:
-        clc
+        sec
         adc   CurrentAddr
         bcc   @Skip
         inc   CurrentAddr+1
@@ -95,16 +95,16 @@ NextInstruction:
         bne   @Done
         lda   CurrentAddr
         cmp   EndAddr
-        bne   @Loop
+        bne   Loop
 @Done:  rts
 
 ;;; Check if address in X (lo), A (hi) is within the original block.
 ;;; Does not modify X or Y.
 Within:
-        cmp   #$20
+        cmp   #OrigStartPage
         blt   @No
         cmp   OrigEndAddr+1
-        blt   @yes
+        blt   @Yes
         bne   @No
         txa
         cmp   OrigEndAddr
