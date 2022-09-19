@@ -2,6 +2,7 @@
 .scope ControlChar
 
 ControlAt     := $00
+Null          := $00
 ControlA      := $01
 ControlB      := $02
 ControlC      := $03
