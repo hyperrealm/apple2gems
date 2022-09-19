@@ -211,6 +211,984 @@ L217C:  sta     SoftSwitch::SETALTZP
         lda     #$00            ; A4 = $D000
         sta     ZeroPage::A4L
         lda     #$D0
+        sta     ZeroPage::A4H
+        lda     #$09            ; A1 = $5D09
+        sta     ZeroPage::A1L
+        lda     #$5D
+        sta     ZeroPage::A1H
+L2195:  lda     (ZeroPage::A1)
+        sta     (ZeroPage::A4)
+        inc     ZeroPage::A4L
+        bne     L219F
+        inc     ZeroPage::A4H
+L219F:  inc     ZeroPage::A1L
+        bne     L21A5
+        inc     ZeroPage::A1H
+L21A5:  lda     ZeroPage::A4H
+        cmp     #$E0
+        bne     L2195
+        sta     SoftSwitch::SETSTDZP
+        lda     SoftSwitch::RDROMLCB1
+        lda     Monitor::SUBID1
+        cmp     #$E0
+        bne     L21BE
+        sec
+        jsr     Monitor::IDROUTINE
+        bcc     L21E7
+L21BE:  sta     SoftSwitch::SETALTZP
+        lda     SoftSwitch::WRLCRAMB1
+        lda     SoftSwitch::WRLCRAMB1
+        stz     $D06F
+        lda     #MT_REMAP(MouseText::OverUnderScore)
+        sta     TitleBarChar
+        lda     #$03
+        sta     CursorBlinkRate
+        lda     #OpCode::NOP_Imp
+        sta     LoadKeyModReg+2
+        stz     LoadKeyModReg+1
+L21DD           := * + 1
+        lda     #OpCode::LDX_Imm
+        sta     LoadKeyModReg
+        sta     SoftSwitch::SETSTDZP
+        lda     SoftSwitch::RDROMLCB1
+L21E7:  ldx     #$1E
+L21E9:  lda     $BF11,x
+        cmp     #$FF
+        beq     L21F7
+        dex
+        dex
+        bne     L21E9
+L21F4:  jmp     L22CD
+
+L21F7:  sta     LBC3A+1
+        lda     ProDOS::DEVADR0,x
+        sta     LBC3A
+        txa
+        tay
+        asl     a
+        asl     a
+        asl     a
+        sta     ReadBlockUnitNum
+        ldx     ProDOS::DEVCNT
+        inx
+L220C:  lda     ProDOS::DEVCNT,x
+        lda     ProDOS::DEVCNT,x
+        and     #%11110000
+        cmp     ReadBlockUnitNum
+        beq     L2234
+        dex
+        bne     L220C
+        stx     LBC3A+1
+        stx     LBC3A
+        stx     ReadBlockUnitNum
+        lda     ProDOS::DEVADR0
+        sta     ProDOS::DEVADR0,y
+        lda     $BF11
+        sta     $BF11,y
+        jmp     L22CD
+
+L2234:  jsr     ProDOS::MLI
+        .byte   ProDOS::CRDBLOCK
+        .addr   ReadBlockParams
+        bne     L21F4
+        ldy     #$2A
+        lda     BlockBuffer,y
+        bne     L21F4
+        dey
+        lda     BlockBuffer,y
+        cmp     #$80
+        bcs     L21F4
+        ldy     #$25
+        lda     BlockBuffer,y
+        ora     BlockBuffer+1,y
+        beq     L2290
+        ldy     #$00
+L2257:  lda     RemoveRamDiskPrompt,y
+        beq     L2262
+        jsr     Monitor::COUT
+        iny
+        bne     L2257
+L2262:  lda     BlockBuffer+4
+        and     #%00001111
+        tax
+        ldy     #$00
+L226A:  lda     BlockBuffer+5,y
+        ora     #%10000000
+        jsr     Monitor::COUT
+        iny
+        dex
+        bne     L226A
+        lda     #HICHAR('?')
+        jsr     Monitor::COUT
+L227B:  lda     #HICHAR(ControlChar::Bell)
+        jsr     Monitor::COUT
+        jsr     Monitor::RDKEY
+        and     #%11011111      ; to uppercase
+        cmp     #HICHAR('Y')
+        beq     L2290
+        cmp     #HICHAR('N')
+        bne     L227B
+        jmp     L20D5
+
+L2290:  lda     ReadBlockUnitNum
+        lsr     a
+        lsr     a
+        lsr     a
+        tax
+        lda     ProDOS::DEVADR0
+        sta     ProDOS::DEVADR0,x
+        lda     $BF11
+        sta     $BF11,x
+        ldx     ProDOS::DEVCNT
+        inx
+L22A7:  lda     ProDOS::DEVCNT,x
+        and     #%11110000
+        cmp     ReadBlockUnitNum
+        beq     L22B6
+        dex
+        bne     L22A7
+        bra     L22CD
+L22B6:  lda     ProDOS::DEVCNT,x
+        sta     LBEBB
+L22BC:  lda     ProDOS::DEVLST,x
+        sta     ProDOS::DEVCNT,x
+        inx
+        cpx     ProDOS::DEVCNT
+        bcc     L22BC
+        beq     L22BC
+        dec     ProDOS::DEVCNT
+L22CD:  lda     CallingProgramPath
+        beq     L22DB
+        lda     CallingProgramPath+1
+        and     #%01111111
+        cmp     #'/'
+        beq     L234D
+L22DB:  lda     ProDOS::SysPathBuf
+        beq     L2333
+        cmp     #'A'
+        bcs     L2333
+        tay
+L22E5:  lda     ProDOS::SysPathBuf,y
+        sta     Pathname2Buffer,y
+        dey
+        bpl     L22E5
+        lda     Pathname2Buffer+1
+        and     #%01111111
+        cmp     #'/'
+        beq     L234A
+        jsr     ProDOS::MLI
+        byte    ProDOS::CGETPREFIX
+        .addr   GetSetPrefixParams
+        beq     L2302
+        jmp     L249C
+
+L2302:  lda     PrefixBuffer
+        beq     L2333
+        tay
+        pha
+L2309:  lda     PrefixBuffer,y
+        sta     Pathname2Buffer,y
+        dey
+        bne     L2309
+        ply
+        ldx     ProDOS::SysPathBuf
+        stx     GetFileInfoModDate
+        ldx     #$01
+L231B:  iny
+        cpy     #$41
+        bcs     L2333
+        lda     ProDOS::SysPathBuf,x
+        sta     Pathname2Buffer,y
+        inx
+        cpx     GetFileInfoModDate
+        bcc     L231B
+        beq     L231B
+        sty     Pathname2Buffer
+        bra     L234A
+L2333:  stz     Pathname2Buffer
+        sta     SoftSwitch::SETALTZP
+        lda     SoftSwitch::WRLCRAMB1
+        lda     SoftSwitch::WRLCRAMB1
+        lda     #$03
+        sta     $FB3C
+        sta     SoftSwitch::SETSTDZP
+        lda     SoftSwitch::RDROMLCB1
+L234A:  jmp     L2449
+
+L234D:  lda     CallingProgramPath
+        tay
+L2351:  lda     CallingProgramPath,y
+        sta     SavedPathToCallingProgram,y
+        dey
+        bpl     L2351
+        lda     CallingProgramReturnAddr
+        sta     JumpToCallingProgram+1
+        lda     CallingProgramReturnAddr+1
+        ora     CallingProgramReturnAddr
+        bne     L236C
+        lda     #>ProDOS::SysLoadAddress
+        bra     L236F
+L236C:  lda     CallingProgramReturnAddr+1
+L236F:  sta     JumpToCallingProgram+2
+        lda     CallingProgramPath
+        tay
+L2376:  lda     CallingProgramPath,y
+        and     #%01111111
+        cmp     #'/'
+        beq     L2385
+        dey
+        bne     L2376
+        jmp     L22DB
+
+L2385:  sty     GetFileInfoModDate
+        ldy     #$01
+L238A:  lda     CallingProgramPath,y
+        sta     ProDOS::SysPathBuf,y
+        sta     Pathname2Buffer,y
+        cpy     GetFileInfoModDate
+        beq     L239B
+        iny
+        bra     L238A
+L239B:  ldx     #$00
+L239D:  iny
+        lda     TicConfigFilename,x
+        beq     L23A9
+        sta     ProDOS::SysPathBuf,y
+        inx
+        bra     L239D
+L23A9:  dey
+        sty     ProDOS::SysPathBuf
+        ldy     GetFileInfoModDate
+        ldx     #$00
+L23B2:  iny
+        lda     TicEditorFilename,x
+        beq     L23BE
+        sta     Pathname2Buffer,y
+        inx
+        bra     L23B2
+L23BE:  dey
+        sty     Pathname2Buffer
+        jsr     ProDOS::MLI
+        .byte   ProDOS::COPEN
+        .addr   OpenParams
+
+        bne     L2449
+        lda     OpenRefNum
+        sta     ReadRefNum
+        sta     CloseRefNum
+        stz     GetFileInfoModDate
+        jsr     ProDOS::MLI
+        .byte   ProDOS::CREAD
+        .addr   ReadParams
+        bne     L23EF
+        lda     MemoryMap::INBUF+1
+        sta     GetFileInfoModDate
+        lda     #$DD
+        sta     ReadReqCount
+        jsr     ProDOS::MLI
+        dex
+        txs
+        rol     a
+L23EF:  jsr     ProDOS::MLI
+        .byte   ProDOS::CCLOSE
+        .addr   CloseParams
+        lda     GetFileInfoModDate
+        beq     L2449
+        sta     SoftSwitch::SETALTZP
+        lda     SoftSwitch::RWLCRAMB1
+        lda     SoftSwitch::RWLCRAMB1
+        lda     GetFileInfoModDate
+        beq     L2443
+        cmp     #$08
+        bcs     L2443
+        sta     PrinterSlot
+        ldy     #$14
+L2411:  lda     $02C9,y
+        sta     Monitor::MAINID,y
+        dey
+        bpl     L2411
+        ldy     #$01
+        ldx     #$01
+L241E:  lda     $02C9,y
+        cmp     #$20
+        bcs     L2430
+        pha
+        lda     #HICHAR('^')
+        sta     PrinterInitString,x
+        inx
+        pla
+        clc
+        adc     #$40
+L2430:  ora     #%10000000
+        sta     PrinterInitString,x
+        cpy     $02C9
+        beq     L2440
+        iny
+        inx
+        cpx     #$14
+        bcc     L241E
+L2440:  stx     PrinterInitString
+L2443:  sta     SoftSwitch::SETSTDZP
+        lda     SoftSwitch::RDROMLCB1
+L2449:  jsr     ProDOS::MLI
+        .byte   ProDOS::CGETPREFIX
+        .addr   GetPrefixParams
+        bne     L249C
+        lda     PrefixBuffer
+        bne     L24AF
+        lda     DocumentPath+1
+        and     #%01111111
+        cmp     #'/'
+        beq     L24AF
+        lda     ProDOS::DEVNUM
+        sta     OnLineUnitNum
+        jsr     ProDOS::MLI
+        .byte   ProDOS::ON_LINE
+        .addr   OnLineParams
+        bne     L249C
+        lda     OnLineBuffer
+        and     #%00001111
+        beq     L249C
+        sta     PrefixBuffer
+        inc     PrefixBuffer
+        ldy     #$01
+        lda     #'/'
+        sta     PrefixBuffer+1
+        ldy     PrefixBuffer
+        lda     PrefixBuffer,y
+        cmp     #'/'
+        beq     L2494
+        iny
+        lda     #'/'
+        sta     PrefixBuffer,y
+        sty     PrefixBuffer
+L2494:  jsr     ProDOS::MLI
+        .byte   ProDOS::CSETPREFIX
+        .addr   GetSetPrefixParams
+        beq     L24AF
+L249C:  jsr     Monitor::HOME
+        ldy     #$00
+L24A1:  lda     DiskErrorOccurredText,y
+        beq     L24AC
+        jsr     Monitor::COUT
+        iny
+        bne     L24A1
+L24AC:  jmp     L20C9
+
+L24AF:  lda     Monitor::MACHID
+        lsr     a
+        bcs     L24B6
+        iny
+L24B6:  sty     $E0
+        lda     #$08
+        sta     MouseSlot
+L24BC:  dec     MouseSlot
+        lda     MouseSlot
+        beq     L24D9
+        ora     #%11000000
+        sta     Pointer+1
+        lda     #$00
+        sta     Pointer
+        ldx     #$05
+L24CC:  ldy     MouseSignatureByteOffsets,x
+        lda     (Pointer),y
+        cmp     MouseSignatureByteValues,x
+        bne     L24BC
+        dex
+        bpl     L24CC
+L24D9:  sta     SoftSwitch::KBDSTRB
+        lda     #<ResetHandler
+        sta     Vector::SOFTEV
+        lda     #>ResetHandler
+        sta     Vector::SOFTEV+1
+        jsr     Monitor::SETPWRC
+;;;  Copy zero page from main to aux mem.
+        ldy     #$00
+L24EB:  sty     SoftSwitch::SETSTDZP
+        lda     $00,y
+        sty     SoftSwitch::SETALTZP
+        sta     $00,y
+        dey
+        bne     L24EB
+;;; Mouse setup
+        lda     SoftSwitch::RWLCRAMB1
+        lda     SoftSwitch::RWLCRAMB1
+        lda     MouseSlot
+        beq     GenerateLinePointerTables
+        ora     #%11000000
+        sta     Pointer+1
+        sta     CallSetMouse+2
+        sta     CallInitMouse+2
+        sta     CallReadMouse+2
+        sta     CallPosMouse+2
+        stz     Pointer
+        ldy     #MouseCall::SetMouse
+        lda     (Pointer),y
+        sta     CallSetMouse+1
+        ldy     #MouseCall::ReadMouse
+        lda     (Pointer),y
+        sta     CallReadMouse+1
+        ldy     #MouseCall::PosMouse
+        lda     (Pointer),y
+        sta     CallPosMouse+1
+        ldy     #MouseCall::InitMouse
+        lda     (Pointer),y
+        sta     CallInitMouse+1
+
+LinePointerTable           := $0800
+
+LineCountForMainMem        := $0213 ; (531 lines)
+LineCountForAuxMem         := $0245 ; (581 lines)
+FirstLinePointerForMainMem := $1200
+FirstLinePointerForAuxMem  := $0A31
+
+GenerateLinePointerTables:
+        lda     #<LinePointerTable
+        sta     Pointer
+        lda     #>LinePointerTable
+        sta     Pointer+1
+        lda     #<LineCountForMainMem
+        sta     LinePointerCount
+        lda     #>LineCountForMainMem
+        sta     LinePointerCount+1
+        lda     #<FirstLinePointerForMainMem
+        sta     LinePointer
+        lda     #>FirstLinePointerForMainMem
+        sta     LinePointer+1
+        jsr     GenerateLinePointerTable
+        lda     #<LineCountForAuxMem
+        sta     LinePointerCount
+        lda     #>LineCountForAuxMem
+        sta     LinePointerCount+1
+        lda     #<FirstLinePointerForAuxMem
+        sta     LinePointer
+        lda     #>FirstLinePointerForAuxMem
+        sta     LinePointer+1
+        jsr     GenerateLinePointerTable
+        lda     DocumentPath
+        bne     LoadInitialDocument
+        jmp     L25AD
+
+LoadInitialDocument:
+        sta     SoftSwitch::SETSTDZP
+        lda     SoftSwitch::RDROMLCB1
+        lda     #<DocumentPath
+        sta     GetFileInfoPathname
+        lda     #>DocumentPath
+        sta     GetFileInfoPathname+1
+        jsr     ProDOS::MLI
+        .byte   ProDOS::CGETFILEINFO
+        .addr   GetFileInfoParams
+        bne     L25A4
+        lda     GetFileInfoFileType
+        cmp     #FileType::DIR
+        beq     L25A4
+        lda     DocumentPath
+        sta     ProDOS::SysPathBuf
+        tay
+L2596:  lda     DocumentPath,y
+        sta     ProDOS::SysPathBuf,y
+        dey
+        bne     L2596
+        lda     #$FF
+        sta     PathnameLength
+L25A4:  sta     SoftSwitch::SETALTZP
+        lda     SoftSwitch::RWLCRAMB1
+        lda     SoftSwitch::RWLCRAMB1
+L25AD:  jsr     LF738
+        jsr     LF5B7
+        jsr     LF786
+        lda     #$80                       ; storing a NUL byte as
+        sta     FirstLinePointerForMainMem ; the first character in the document?
+        ldy     DocumentPath
+L25BE:  lda     DocumentPath,y
+        sta     PathnameBuffer,y
+        dey
+        bpl     L25BE
+        jmp     MainEditor
+
+;;; This creates a pointer table, starting at (Pointer), of length
+;;; LinePointerCount. The first pointer's value is LinePointerValue and
+;;; each subsequent pointer is 80 + the previous pointer.
+GenerateLinePointerTable:
+        ldy     #$00
+        lda     LinePointer
+        sta     (Pointer),y     ; *Pointer = LinePointer
+        iny
+        lda     LinePointer+1
+        sta     (Pointer),y
+        lda     Pointer
+        clc
+        adc     #$02            ; Pointer += 2
+        sta     Pointer
+        bcc     L25E2
+        inc     Pointer+1
+L25E2:  lda     LinePointer
+        clc
+        adc     #80            ; LinePointer += 80
+        sta     LinePointer
+        bcc     L25F0
+        inc     LinePointer+1
+L25F0:  dec     LinePointerCount    ; LinePointerCount -= 1
+        lda     LinePointerCount
+        cmp     #$FF
+        bne     L25FD
+        dec     LinePointerCount+1
+L25FD:  lda     LinePointerCount+1  ; loop until LinePointerCount == 0
+        ora     LinePointerCount
+        bne     GenerateLinePointerTable
+        rts
+
+TitleScreenText:
+        .highascii "\r\r______________________________"
+        .highascii "_______________________________"
+        .highascii "___________________\r"
+        .highascii "                        "
+        .byte   ControlChar::InverseVideo, ControlChar::MouseTextOn
+        .highascii "["
+        .byte   ControlChar::NormalVideo+$80, ControlChar::MouseTextOff+$80
+        .highascii "\r                         "
+        .byte   ControlChar::InverseVideo, ControlChar::MouseTextOn
+        .highascii "["
+        .byte   ControlChar::NormalVideo+$80, ControlChar::MouseTextOff+$80
+        .highascii "  Ed-It! - A Text File Editor\r"
+        .highascii "                        "
+        .byte   ControlChar::InverseVideo, ControlChar::MouseTextOn
+        .highascii "["
+        .byte   ControlChar::NormalVideo+$80, ControlChar::MouseTextOff+$80
+        .highascii "\r                               "
+        .highascii "   by Bill Tudor\r"
+        .highascii "                            ___"
+        .highascii "______________________\r"
+        .highascii "                           "
+        .byte   ControlChar::InverseVideo, ControlChar::MouseTextOn
+        .highascii "Z"
+        .byte   ControlChar::NormalVideo, ControlChar::MouseTextOff
+        .highascii " Northeast Micro Systems "
+        .byte   ControlChar::InverseVideo, ControlChar::MouseTextOn
+        .highascii "_"
+        .byte   ControlChar::NormalVideo, ControlChar::MouseTextOff
+        .highascii "\r                           "
+        .byte   ControlChar::InverseVideo, ControlChar::MouseTextOn
+        .highascii "Z"
+        .byte   ControlChar::NormalVideo, ControlChar::MouseTextOff
+        .highascii "   1220 Gerling Street   "
+        .byte   ControlChar::InverseVideo, ControlChar::MouseTextOn
+        .highascii "_"
+        .byte   ControlChar::NormalVideo, ControlChar::MouseTextOff
+        .highascii "\r                           "
+        .byte   ControlChar::InverseVideo, ControlChar::MouseTextOn
+        .highascii "Z"
+        .byte   ControlChar::NormalVideo, ControlChar::MouseTextOff
+        .highascii "  Schenectady, NY 12308  "
+        .byte   ControlChar::InverseVideo, ControlChar::MouseTextOn
+        .highascii "_"
+        .byte   ControlChar::NormalVideo, ControlChar::MouseTextOff
+        .highascii "\r                           "
+        .byte   ControlChar::InverseVideo, ControlChar::MouseTextOn
+        .highascii "Z"
+        .byte   ControlChar::NormalVideo, ControlChar::MouseTextOff
+        .highascii "   Tel. (518) 370-3976   "
+        .byte   ControlChar::InverseVideo, ControlChar::MouseTextOn
+        .highascii "_"
+        .byte   ControlChar::NormalVideo, ControlChar::MouseTextOff
+        .highascii "\r                            "
+        .byte   ControlChar::InverseVideo, ControlChar::MouseTextOn
+        .highascii "LLLLLLLLLLLLLLLLLLLLLLLLL"
+        .byte   ControlChar::NormalVideo, ControlChar::MouseTextOff
+        .highascii "\r                               "
+        .highascii " Copyright 1988-89\r"
+        .highascii "                               "
+        .highascii "ALL RIGHTS RESERVED\r"
+        .highascii "                               "
+        .highascii "  Sept. 89  v3.00\r"
+        .highascii "_______________________________"
+        .highascii "_______________________________"
+        .highascii "__________________"
+        .byte   $00
+
+RequiresText:
+        .highascii "ED-IT! REQUIRES AN APPLE //C\r"
+        .highascii "ENHANCED //E, OR APPLE IIGS\r"
+        .highascii "WITH AT LEAST 128K RAM AND\r"
+        .highasciiz "AN 80-COLUMN CARD."
+
+DiskErrorOccurredText:
+        .highascii "DISK-RELATED ERROR OCCURRED!"
+        .byte   HICHAR(ControlChar::Bell)
+        .byte   $00
+
+RemoveRamDiskPrompt:
+        .highascii "\r\rAuxillary 64K RamDisk found!\r"
+        .highasciiz "OK to remove files on /\r"
+        .highasciiz "Loading EDIT.CONFIG.."
+
+MouseSignatureByteOffsets:
+        .byte   $05,$07,$0B,$0C,$FB,$11
+MouseSignatureByteValues:
+        .byte   $38,$18,$01,$20,$D6,$00
+
+LinePointerCount:
+        .word   $0000
+LinePointer:
+        .addr   $0000
+
+TicConfigFilename:
+        .asciiz "TIC.CONFIG"
+TicEditorFilename:
+        .asciiz "TIC.EDITOR"
+
+;;; 64-byte buffer (unused?)
+L2A4D:
+        .byte   $00,$00,$00,$00,$00,$00,$00,$00
+        .byte   $00,$00,$00,$00,$00,$00,$00,$00
+        .byte   $00,$00,$00,$00,$00,$00,$00,$00
+        .byte   $00,$00,$00,$00,$00,$00,$00,$00
+        .byte   $00,$00,$00,$00,$00,$00,$00,$00
+        .byte   $00,$00,$00,$00,$00,$00,$00,$00
+        .byte   $00,$00,$00,$00,$00,$00,$00,$00
+        .byte   $00,$00,$00,$00,$00,$00,$00,$00
+
+GetSetPrefixParams:
+        .byte   $01,
+        .addr   PrefixBuffer
+
+OnLineParams:
+        .byte   $02
+OnLineUnitNum:
+        .byte   $00
+        .addr   OnLineBuffer
+
+OpenParams:
+        .byte  $03
+        .addr  ProDOS::SysPathBuf
+        .addr  $8000
+OpenRefNum:
+        .byte   $00
+
+ReadParams:
+        .byte   $04
+ReadRefNum:
+        .byte   $00
+        .addr   MemoryMap::INBUF
+ReadReqCount:
+        .word   $0002
+        .word   $0000
+
+CloseParams:
+        .byte   $01
+CloseRefNum:
+        .byte   $00
+
+ReadBlockParams:
+        .byte   $03
+ReadBlockUnitNum:
+        .byte   $00
+        .addr   BlockBuffer
+        .word   $0002
+
+GetFileInfoParams:
+        .byte   $0A
+GetFileInfoPathname:
+        .addr   $0000
+        .byte   $00             ; access
+GetFileInfoFileType:
+        .byte   $00
+
+        .word   $0000           ; aux_type
+        .byte   $00             ; storage_type
+        .word   $0000           ; blocks_used
+GetFileInfoModDate:
+        .word   $0000           ; mod_date
+        .word   $0000           ; mod_time
+        .word   $0000           ; create_date
+        .word   $0000           ; create_time
+
+        .reloc
+
+;;; This code gets relocated to $D000 (bank 1) to $FF70 in LCRAM
+
+MainEditorCodeStart := *
+
+        .org $D000
+
+MainEditor:
+        jsr     ClearTextWindow
+        jsr     DrawMenuBarAndMenuTitles
+LD006:  jsr     OutputStatusBarLine
+        lda     #3
+        sta     ZeroPage::WNDTOP
+        lda     #22
+        sta     ZeroPage::WNDBTM
+        jsr     ClearTextWindow
+        bit     PathnameLength
+        beq     LD01C
+        jmp     LoadFile
+
+LD01C:  jsr     LEF42
+        jsr     LEF49
+        jsr     LEF58
+LD025:  jsr     LEF10
+        bra     MainEditorInputLoop
+LD02A:  ldy     CurrentCursorYPos
+        ldx     CurrentCursorXPos
+        jsr     SetCursorPosToXY
+        jsr     LEED9
+
+;;; Main input loop starts here?
+MainEditorInputLoop:
+        jsr     LEF67
+        ldy     CurrentCursorYPos
+        ldx     CurrentCursorXPos
+        jsr     SetCursorPosToXY
+        jsr     GetKeypress
+        bmi     LD063
+        cmp     #ControlChar::Esc
+        beq     LD067
+LD04B:  ldy     OpenAppleKeyComboTable
+LD04E:  cmp     OpenAppleKeyComboTable,y
+        beq     LD05C
+        dey
+        bne     LD04E
+        jsr     LF1A3
+        jmp     MainEditorInputLoop
+
+LD05C:  dey
+        tya
+        asl     a
+        tax
+        jmp     (OpenAppleKeyComboJumpTable,x)
+
+LD063:  cmp     #HICHAR(ControlChar::Esc)
+        bne     LD06C
+LD067:  jsr     LD986
+        bra     LD01C
+LD06C:  pha
+        txa
+        and     #%00010000
+        beq     LD085
+        pla
+        ldy     FunctionKeys
+LD076:  cmp     FunctionKeys,y
+        beq     LD080
+        dey
+        bne     LD076
+        bra     LD086
+LD080:  lda     FunctionKeysRemapped-1,y
+        bra     LD04B
+LD085:  pla
+LD086:  cmp     #$FF
+        bne     LD08D
+        jmp     LD439
+
+LD08D:  cmp     #$A0
+        bcc     LD094
+        jmp     LD2FF
+
+LD094:  ldy     LFB21
+LD097:  cmp     LFB21,y
+        beq     LD0A5
+        dey
+        bne     LD097
+        jsr     LF1A3
+        jmp     MainEditorInputLoop
+
+LD0A5:  dey
+        tya
+        asl     a
+        tax
+        jmp     (LFB2A,x)
+
+;;; Handlers for menu items in "Utilities" menu
+SetNewPrefix:
+        ldx     #$01            ; New Prefix
+        bra     LD0B6
+ListVolumes:
+        ldx     #$02            ; Volumes
+        bra     LD0B6
+ListDirectory:
+        ldx     #$00            ; Directory
+LD0B6:  lda     #$01            ; Menu number 1
+        bra     LD0DD
+
+;;; Handlers for menu items in "File" menu
+ShowAboutBox:
+        ldx     #$00            ; About
+        bra     LD0DB
+PrintDocument:
+        ldx     #$03            ; Print
+        bra     LD0DB
+QuitEditor:
+        ldx     #$05            ; Quit
+        bra     LD0DB
+LoadFile:
+        ldx     #$01            ; Load File
+        bra     LD0DB
+SaveFile:
+        ldx     #$02            ; Save/Save As
+        lda     PathnameBuffer
+        beq     LD0DB
+        sta     PathnameLength
+        sta     LFBAD
+        bra     LD0DB
+ClearMemory:
+        ldx     #$04            ; Clear Memory
+LD0DB:  lda     #$00            ; Menu number 0
+
+;;; Dispatch to menu item handler; menu # in A, menu item # in X.
+LD0DD:  jsr     LD97C
+        jmp     LD01C
+
+ForwardTab:
+        ldy     CurrentCursorXPos           ; current cursor x
+@Loop:  cpy     LastEditableColumn
+        beq     @Done
+        iny
+        lda     TabStops,y
+        beq     @Loop
+@Done:  sty     CurrentCursorXPos
+        jmp     MainEditorInputLoop
+
+BackwardTab:
+        ldy     CurrentCursorXPos
+@Loop:  cpy     #$00
+        beq     @Done
+        dey
+        lda     TabStops,y
+        beq     @Loop
+@Done:  sty     CurrentCursorXPos
+        jmp     MainEditorInputLoop
+
+ToggleInsertOverwrite:
+        lda     OverwriteCursorChar
+        cmp     CurrentCursorChar
+        bne     LD115
+        lda     InsertCursorChar
+LD115:  sta     CurrentCursorChar
+        jmp     MainEditorInputLoop
+
+;;;  Process left arrow key
+MoveLeftOneChar:
+        lda     CurrentCursorXPos
+        beq     LD126
+        dec     CurrentCursorXPos
+        jmp     MainEditorInputLoop
+LD126:  jsr     LF65B
+        beq     LD157
+        jsr     LF6D1
+        jsr     LF9EA
+        and     #%01111111
+        sta     CurrentCursorXPos
+        jmp     LD025
+
+MoveUpOneLine:
+        jsr     LF65B
+        beq     @Done
+        jsr     LF6D1
+@Done:  jmp     MainEditorInputLoop
+
+MoveRightOneChar:
+LD144:  lda     CurrentCursorXPos
+        cmp     LastEditableColumn
+        beq     LD152
+        inc     CurrentCursorXPos
+        jmp     MainEditorInputLoop
+
+LD152:  jsr     LF61C
+        bne     LD15A
+LD157:  jmp     MainEditorInputLoop
+
+LD15A:  stz     CurrentCursorXPos
+
+MoveDownOneLine:
+        jsr     LF61C
+        beq     @Done
+        jsr     LF6E9
+@Done:  jmp     MainEditorInputLoop
+
+PageUp:
+        jsr     LF65B
+        beq     LD165
+        lda     CurrentCursorYPos
+        cmp     #$03
+        beq     LD186
+        sec
+        sbc     #$03
+        tay
+LD178:  jsr     LF666
+        dey
+        bne     LD178
+        lda     #$03
+        sta     CurrentCursorYPos
+        jmp     MainEditorInputLoop
+
+LD186:  ldy     #$13
+LD188:  jsr     LF666
+        dey
+        bne     LD188
+        lda     LBEA9+1
+        cmp     #$FF
+        beq     LD19A
+        ora     LBEA9
+        bne     LD19D
+LD19A:  jsr     LF738
+LD19D:  lda     #$03
+        sta     CurrentCursorYPos
+        jsr     LD025
+
+PageDown:
+        jsr     LF61C
+        beq     LD165
+        lda     #21
+        cmp     CurrentCursorYPos
+        beq     LD1D3
+        sec
+        sbc     CurrentCursorYPos
+        sta     LBE9C
+        ldy     #$00
+LD1BA:  jsr     LF61C
+        beq     LD1C8
+        jsr     LF6A9
+        iny
+        cpy     LBE9C
+        bne     LD1BA
+LD1C8:  tya
+        clc
+        adc     CurrentCursorYPos
+        sta     CurrentCursorYPos
+        jmp     MainEditorInputLoop
+
+LD1D3:  ldy     #$13
+LD1D5:  jsr     LF6A9
+        jsr     LF61C
+        beq     LD1E0
+        dey
+        bne     LD1D5
+LD1E0:  jmp     LD025
+
+MoveLeftOneWord:
+        lda     CurrentCursorXPos
+        bne     LD1F2
+        jsr     LF65B
+        beq     LD20F
+        jsr     LF6D1
+        bra     LD246
+LD1F2:  jsr     LF62B
+        bcc     LD246
+        ldy     CurrentCursorXPos
+        jsr     LF9F1
+        cmp     #$20
+        bne     LD204
+        jsr     LF701
+LD204:  jsr     LF71C
+        cpy     #$00
+        beq     LD20C
+        dey
+LD20C:  sty     CurrentCursorXPos
+LD20F:  jmp     MainEditorInputLoop
+
+MoveRightOneWord:
+        lda     CurrentCursorXPos
         cmp     #77
         bcs     LD236
         ldy     CurrentCursorXPos
@@ -1081,27 +2059,31 @@ LD9A5:  jsr     LDFFE
         jsr     LE04C
 LD9AD:  jsr     LDFAC
         lda     $E4
-        bne     LDA2C
+        bne     SelectMenuItem
 LD9B4:  ldy     #23
         ldx     #54
         jsr     SetCursorPosToXY
-        ldx     #$06
+        ldx     #6
         jsr     GetSpecificKeypress
-        bcs     LD9D6
+        bcs     CleanUpAfterMenuSelection
         txa
         asl     a
         tax
-        jmp     (LD9C8,x)
+        jmp     (MenuNavigationKeypressHandlerTable,x)
 
-LD9C8:  .addr   LD9EC
-        .addr   LDA2C
-        .addr   LD9EC
-        .addr   LDA0E
-        .addr   LDA2C
-        .addr   LD9F1
-        .addr   LDA00
+MenuNavigationKeypressHandlerTable:
+        .addr   InvalidMenuKey           ; any other key
+        .addr   SelectMenuItem           ; Return
+        .addr   InvalidMenuKey           ; Space
+        .addr   MoveToPreviousMenu       ; Left arrow
+        .addr   MoveToNextMenu           ; Right arrow
+        .addr   MoveToPreviousMenuItem   ; Up Arrow
+        .addr   MoveToNextMenuItem       ; Down Arrow
 
-LD9D6:  jsr     RestoreScreenAreaUnderMenus
+;;; Removes a menu after a menu selection triggered the display of
+;;; a dialog box (in which case the menu is still on-screen)
+CleanUpAfterMenuSelection:
+        jsr     RestoreScreenAreaUnderMenus
         jsr     DrawMenuBarAndMenuTitles
         lda     #HICHAR(ControlChar::Esc)
         sta     LBEC8+4
@@ -1111,19 +2093,23 @@ LD9D6:  jsr     RestoreScreenAreaUnderMenus
         sta     LFB8D
         rts
 
-LD9EC:  jsr     PlayTone
+InvalidMenuKey:
+        jsr     PlayTone
         bra     LD9B4
 
-LD9F1:  lda     MenuItemNumber
+MoveToPreviousMenuItem:
+        lda     MenuItemNumber
         dec     a
-        bpl     LD9FC
+        bpl     @NoWrap
         ldy     MenuNumber
         lda     MenuLengths,y
         dec     a
-LD9FC:  sta     MenuItemNumber
+@NoWrap:
+        sta     MenuItemNumber
         bra     LD9AD
 
-LDA00:  lda     MenuItemNumber
+MoveToNextMenuItem:
+        lda     MenuItemNumber
         inc     a
         ldy     MenuNumber
         cmp     MenuLengths,y
@@ -1131,22 +2117,28 @@ LDA00:  lda     MenuItemNumber
         lda     #$00
         bra     LD9FC
 
-LDA0E:  lda     MenuNumber
+MoveToPreviousMenu:
+        lda     MenuNumber
         dec     a
-        bpl     LDA17
-        lda     LFB43
+        bpl     @NoWrap
+        lda     MenuCount
         dec     a
-LDA17:  sta     MenuNumber
+@NoWrap:
+        sta     MenuNumber
         jsr     RestoreScreenAreaUnderMenus
         stz     MenuItemNumber
         bra     LD9A5
+
+MoveToNextMenu:
         lda     MenuNumber
         inc     a
-        cmp     LFB43
-        bcc     LDA17
+        cmp     MenuCount
+        blt     LDA17
         lda     #$00
         bra     LDA17
-LDA2C:  jsr     LDF97
+
+SelectMenuItem:
+        jsr     LDF97
         lda     MenuNumber
         asl     a
         asl     a
@@ -1177,7 +2169,7 @@ ShowVolumesDialog:
         jsr     LE7A9
         bra     LDA5E
 LDA5B:  jsr     WaitForSpaceToContinueInStatusLine
-LDA5E:  jmp     LD9D6
+LDA5E:  jmp     CleanUpAfterMenuSelection
 
 LDA61:  lda     #$00
         sta     LFBAE
@@ -1238,7 +2230,7 @@ ShowPrintDialog:
         jsr     LF5C0
         jsr     LF2C3
         jsr     LF5D7
-        jmp     LD9D6
+        jmp     CleanUpAfterMenuSelection
 
 ShowQuitDialog:
         jsr     DrawDialogBox
@@ -1265,7 +2257,7 @@ ShowQuitDialog:
         jsr     DrawAbortButton
         jsr     DisplayHitEscToEditDocInStatusLine
 LDB0D:  jsr     PlayTone
-        ldx     #$01
+        ldx     #1
         jsr     GetSpecificKeypress
         bcs     LDB4E
         ora     #%10000000      ; set MSB
@@ -1291,8 +2283,7 @@ LDB36:  lda     LFBAF
 LDB46:  jsr     LE4F8
         bcs     LDB4E
 @Exit:  jmp     LBC00
-
-LDB4E:  jmp     LD9D6
+LDB4E:  jmp     CleanUpAfterMenuSelection
 
 ShowAboutBox:
         jsr     DrawDialogBox
@@ -1352,15 +2343,15 @@ ShowAboutBox:
         ldx     #>TDA02
         jsr     DisplayMSB1String
         jsr     WaitForSpaceToContinueInStatusLine
-        jmp     LD9D6
+        jmp     CleanUpAfterMenuSelection
 
 ShowSaveAsDialog:
         jsr     LE4F8
-        jmp     LD9D6
+        jmp     CleanUpAfterMenuSelection
 
 ShowListDirectoryDialog:
         jsr     LE098
-        jmp     LD9D6
+        jmp     CleanUpAfterMenuSelection
 
 ShowSetPrefixDialog:
         lda     #$73
@@ -1504,11 +2495,11 @@ LDCFE:  lda     ProDOS::SysPathBuf-1,y
         lda     #'/'
         sta     PrefixBuffer,y
         sty     PrefixBuffer
-LDD1C:  jmp     LD9D6
+LDD1C:  jmp     CleanUpAfterMenuSelection
 
 ShowOpenFileDialog:
         jsr     LE28A
-        jmp     LD9D6
+        jmp     CleanUpAfterMenuSelection
 
 ShowChangeMouseStatusDialog:
         jsr     DrawDialogBox
@@ -1538,7 +2529,7 @@ ShowChangeMouseStatusDialog:
         lda     MouseSlot
         sta     SavedMouseSlot
         stz     MouseSlot
-LDD5E:  jmp     LD9D6
+LDD5E:  jmp     CleanUpAfterMenuSelection
 
 LDD61:  lda     SavedMouseSlot
         beq     LDD7D
@@ -1550,14 +2541,14 @@ LDD61:  lda     SavedMouseSlot
         bcs     LDD5E
         lda     SavedMouseSlot
         sta     MouseSlot
-        jmp     LD9D6
+        jmp     CleanUpAfterMenuSelection
 
 LDD7D:  lda     #<TD8A7         ; "No mouse in system!"
         ldx     #>TD8A7
         jsr     DisplayMSB1String
         jsr     DisplayHitEscToEditDocInStatusLine
         jsr     GetKeypress
-        jmp     LD9D6
+        jmp     CleanUpAfterMenuSelection
 
 ChangeBlinkRate:
         lda     #<TD8DA         ; "Enter new rate..."
@@ -1568,7 +2559,7 @@ ChangeBlinkRate:
         bne     LDD9C
         inc     a
 LDD9C:  sta     CursorBlinkRate
-LDD9F:  jmp     LD9D6
+LDD9F:  jmp     CleanUpAfterMenuSelection
 
 ShowClearMemoryDialog:
         jsr     DrawDialogBox
@@ -1603,7 +2594,7 @@ LDDCB:  jsr     PlayTone
         lda     #$80
         jsr     LFA2C
         stz     PathnameBuffer
-LDDEA:  jmp     LD9D6
+LDDEA:  jmp     CleanUpAfterMenuSelection
 
 SetLineLengthPrompt:
         lda     DocumentLineCount+1
@@ -1673,7 +2664,7 @@ LDE79:  cmp     #$27
         sta     CurrentLineLength
         dec     a
         sta     LastEditableColumn
-LDE88:  jmp     LD9D6
+LDE88:  jmp     CleanUpAfterMenuSelection
 
 LDE8B:  .byte   $00
 LDE8C:  .byte   $00
@@ -1706,7 +2697,7 @@ LDEBC:  and     #%11011111
         jsr     PlayTone
         bra     LDEB1
 LDECB:  jsr     LDED8
-LDECE:  jmp     LD9D6
+LDECE:  jmp     CleanUpAfterMenuSelection
 
 LDED1:  and     #%00001111
         jsr     EditMacro
@@ -3119,7 +4110,7 @@ LEAA5:  lda     DateTimeFormatString,y
 
 BeepAndWaitForReturnOrEscKey:
         jsr     PlayTone
-LEAB7:  ldx     #$01
+LEAB7:  ldx     #1
         jsr     GetSpecificKeypress
         bcs     @Out
         cpx     #$00
@@ -3130,6 +4121,8 @@ LEAB7:  ldx     #$01
 ;;;  Wait for a special key (from SpecialKeyTable, any key in first X entries), or Esc.
 ;;;  Return with carry clear if that key was pressed, carry set
 ;;;  if Esc was pressed.
+;;;  Returns 0 if none of the special keys were pressed, otherwise returns 1+ the offset
+;;;  in SpecialKeyTable of the key that was pressed.
 
 GetSpecificKeypress:
         phx
@@ -3146,15 +4139,15 @@ LEAD5:  clc
 
 SpecialKeyTable:
         .byte   HICHAR(ControlChar::Return)
-        .byte   HICHAR(ControlChar::LeftArrow)
         .byte   HICHAR(' ')
+        .byte   HICHAR(ControlChar::LeftArrow)
         .byte   HICHAR(ControlChar::RightArrow)
         .byte   HICHAR(ControlChar::UpArrow)
-        .byte   HICHAR(ControLChar::DownArrow)
+        .byte   HICHAR(ControlChar::DownArrow)
 
 LEADD:  jsr     PlayTone
 GetConfirmationKeypress:
-        ldx     #$01
+        ldx     #1
         jsr     GetSpecificKeypress
         bcs     LEAF2
         and     #%11011111      ; conver t to uppercase
@@ -4033,7 +5026,7 @@ WaitForSpaceToContinueInStatusLine:
         ldx     #>TD726
         jsr     DisplayStringInStatusLine
 WaitForSpaceKeypress:
-        ldx     #$02
+        ldx     #2
         jsr     GetSpecificKeypress
         cpx     #$00
         beq     WaitForSpaceKeypress
@@ -5382,8 +6375,8 @@ MenuXPositions:
 MenuWidths:
         .byte   19,17,21 ; menu widths
 
-LFB43:
-        .byte   3        ; menu count?
+MenuCount:
+        .byte   3        ; menu count
 
 ;;; Pointers into Menu Item strings table below (for each menu)
 MenuItemListAddresses:
@@ -5435,7 +6428,7 @@ MenuItemJumpTable:
         .addr   ShowMacrosScreen ;  Macros
 
 LFB8C:
-        ;;  sometimes set to $83,$7D - compared to mouse coordinates
+        ;;  set to $83,$7D during menu navigation - compared to mouse coordinates
         .byte   $97,$69         ; something to do with mouse clamping values?
 ;;; search text, probably (20 chars):
 SearchText:
