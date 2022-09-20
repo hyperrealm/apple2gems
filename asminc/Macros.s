@@ -25,3 +25,8 @@
                 .byte .strat(s,i) | $80
         .endrepeat
 .endmacro
+
+.macro repeatbyte c, l
+        .repeat l
+        .byte c
+        .endrepeat

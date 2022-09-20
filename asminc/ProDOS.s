@@ -6,6 +6,12 @@ MLI             := $BF00        ; MLI entry point
 SysLoadAddress  := $2000
 SysPathBuf      := $0280
 
+;;; Zero page locations
+
+DiskDriverCommandNum := $42
+DiskDriverUnitNum := $43
+DiskDriverBufferPtr := $44 ; 2 bytes
+
 InterpreterID   := $EE  ; ID byte for interpreter programs
 
 ;;; MLI call numbers
