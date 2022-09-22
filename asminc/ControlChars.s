@@ -64,4 +64,30 @@ SetCursorChar := $1E
 CursorUp      := $1F
 Delete        := $7F
 
+
+;;; IIGS + Extended Keyboard II only. These keys are
+;;; read as numeric keypad keys.
+
+F1            := $FA            ; 'z' - Undo
+F2            := $F8            ; 'x' - Cut
+F3            := $E3            ; 'c' - Copy
+F4            := $F6            ; 'v' - Paste
+F5            := $E0            ; '`'
+F6            := $E1            ; 'a'
+F7            := $E2            ; 'b'
+F8            := $E4            ; 'd'
+F9            := $E5            ; 'e'
+F10           := $ED            ; 'm'
+F11           := $E7            ; 'g'
+F12           := $EF            ; 'o'
+F13           := $E9            ; 'i' - Print Screen
+F14           := $EB            ; 'k' - Scroll Lock
+F15           := $F1            ; 'q' - Pause
+Help          := $F2            ; 'r'
+Home          := $F3            ; 's'
+PageUp        := $F4            ; 't'
+DeleteFwd     := $F5            ; 'u'
+End           := $F7            ; 'w'
+PageDown      := $F9            ; 'y'
+
 .endscope
