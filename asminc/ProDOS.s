@@ -12,6 +12,8 @@ DiskDriverCommandNum := $42
 DiskDriverUnitNum := $43
 DiskDriverBufferPtr := $44 ; 2 bytes
 
+
+MaxPathnameLength := $40
 InterpreterID   := $EE  ; ID byte for interpreter programs
 
 ;;; MLI call numbers
