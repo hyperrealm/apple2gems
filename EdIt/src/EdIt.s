@@ -53,6 +53,13 @@ BottomTextLine := 21
 StatusLine     := 23
 LastColumn     := 79
 
+VisibleLineCount      := BottomTextLine-TopTextLine+1
+MaxLineCount          := $0458
+LastLinePointer       := $BBB0
+MaxMacroLength        := 70
+NumLinesOnPrintedPage := 54
+StartingMousePos      := 128
+
 ;;; mask for converting lowercase char to uppercase
 ToUpperCaseANDMask := %11011111
 ;;; mask for converting digit char to digit value
@@ -60,14 +67,7 @@ CharToDigitANDMask := %00011111
 ;;; mask for converting digit value to (high ascii) digit char
 DigitToCharORMask := %10110000
 ;;; mask for converting uppercase char to control char
-ToControlCharANDMask := %00011111
-
-VisibleLineCount := BottomTextLine-TopTextLine+1
-MaxLineCount  := $0458
-
-MaxMacroLength := 70
-NumLinesOnPrintedPage := 54
-StartingMousePos := 128
+UppercaseToControlCharANDMask := %00011111
 
         jmp     SysStart
 
@@ -310,7 +310,7 @@ L2234:  jsr     ProDOS::MLI
         ldy     #$25
         lda     BlockBuffer,y   ; file_count == 0?
         ora     BlockBuffer+1,y
-        beq     L2290           ; yes - /RAM is empty
+        beq     DisconnectRAMDisk ; yes - /RAM is empty
         ldy     #0
 L2257:  lda     RemoveRamDiskPrompt,y
         beq     L2262
@@ -334,11 +334,12 @@ L227B:  lda     #HICHAR(ControlChar::Bell)
         jsr     Monitor::RDKEY
         and     #ToUpperCaseANDMask
         cmp     #HICHAR('Y')
-        beq     L2290
+        beq     DisconnectRAMDisk
         cmp     #HICHAR('N')
         bne     L227B
         jmp     QuitToProDOS
-L2290:  lda     ReadBlockUnitNum
+DisconnectRAMDisk:
+        lda     ReadBlockUnitNum
         lsr     a
         lsr     a
         lsr     a
@@ -368,62 +369,68 @@ L22BC:  lda     ProDOS::DEVLST,x
 
 AfterRAMDiskDisconnected:
         lda     CallingProgramPath
-        beq     L22DB
+        beq     L22DB ; branch if no path
         lda     CallingProgramPath+1
         and     #%01111111
         cmp     #'/'
-        beq     L234D
+        beq     SaveCallingProgramInfo ; branch if absolute path
 L22DB:  lda     ProDOS::SysPathBuf
-        beq     L2333
-        cmp     #'A'
-        bge     L2333
+        beq     L2333 ; branch if no path
+        cmp     #ProDOS::MaxPathnameLen+1
+        bge     L2333 ; branch if path too long
         tay
-L22E5:  lda     ProDOS::SysPathBuf,y
-        sta     Pathname2Buffer,y
+L22E5:  lda     ProDOS::SysPathBuf,y ; copy our path
+        sta     MacrosFilePathnameBuffer,y ; to macros file path
         dey
         bpl     L22E5
-        lda     Pathname2Buffer+1
+        lda     MacrosFilePathnameBuffer+1
         and     #%01111111
         cmp     #'/'
-        beq     L234A
-        jsr     ProDOS::MLI
+        beq     L234A ; branch if absolute path
+        jsr     ProDOS::MLI ; get prefix
         byte    ProDOS::CGETPREFIX
         .addr   GetSetPrefixParams
         beq     L2302
-        jmp     L249C
+        jmp     DiskErrorDuringInit
 L2302:  lda     PrefixBuffer
-        beq     L2333
+        beq     L2333 ; branch if empty prefix
         tay
         pha
-L2309:  lda     PrefixBuffer,y
-        sta     Pathname2Buffer,y
+L2309:  lda     PrefixBuffer,y ; copy prefix to macros file path
+        sta     MacrosFilePathnameBuffer,y
         dey
         bne     L2309
         ply
         ldx     ProDOS::SysPathBuf
-        stx     GetFileInfoModDate
+        stx     GetFileInfoModDate ; store our pathname length
         ldx     #1
 L231B:  iny
         cpy     #ProDOS::MaxPathnameLength+1
         bge     L2333
-        lda     ProDOS::SysPathBuf,x
-        sta     Pathname2Buffer,y
+        lda     ProDOS::SysPathBuf,x ; append our path to macros file path
+        sta     MacrosFilePathnameBuffer,y
         inx
         cpx     GetFileInfoModDate
         blt     L231B
         beq     L231B
-        sty     Pathname2Buffer
+        sty     MacrosFilePathnameBuffer ; update pathname length
         bra     L234A
-L2333:  stz     Pathname2Buffer
+L2333:  stz     MacrosFilePathnameBuffer ; there's no macros file
         sta     SoftSwitch::SETALTZP
         lda     SoftSwitch::WRLCRAMB1
         lda     SoftSwitch::WRLCRAMB1
         lda     #3
-        sta     MenuXPositions
+        sta     MenuLengths+2 ; remove the "Edit Macros" menu item
         sta     SoftSwitch::SETSTDZP
         lda     SoftSwitch::RDROMLCB1
-L234A:  jmp     L2449
-L234D:  lda     CallingProgramPath
+L234A:  jmp     AfterConfigFilesRead
+SaveCallingProgramInfo:
+;;; Save calling program path and entry point address.
+;;; Get the directory portion of that path; if there is
+;;; one, use that as the directory to load config files
+;;; from; otherwise, branch backward to use the
+;;; directory that this SYS program is in, if possible.
+        lda     CallingProgramPath
         tay
 L2351:  lda     CallingProgramPath,y
         sta     SavedPathToCallingProgram,y
@@ -440,25 +447,25 @@ L236C:  lda     CallingProgramReturnAddr+1
 L236F:  sta     JumpToCallingProgram+2
         lda     CallingProgramPath
         tay
-L2376:  lda     CallingProgramPath,y
-        and     #%01111111
+L2376:  lda     CallingProgramPath,y ; search backward for slash
+        and     #%01111111           ; to get directory part
         cmp     #'/'
         beq     L2385
         dey
         bne     L2376
-        jmp     L22DB
-L2385:  sty     GetFileInfoModDate
+        jmp     L22DB              ; no slash found
+L2385:  sty     GetFileInfoModDate ; save length up to slash
         ldy     #1
-L238A:  lda     CallingProgramPath,y
-        sta     ProDOS::SysPathBuf,y
-        sta     Pathname2Buffer,y
+L238A:  lda     CallingProgramPath,y ; copy that path
+        sta     ProDOS::SysPathBuf,y ; to SysPathBuf
+        sta     MacrosFilePathnameBuffer,y ; and to macros file path
         cpy     GetFileInfoModDate
         beq     L239B
         iny
         bra     L238A
 L239B:  ldx     #0
 L239D:  iny
-        lda     TicConfigFilename,x
+        lda     TicConfigFilename,x ; append config filename to SysPathBuf
         beq     L23A9
         sta     ProDOS::SysPathBuf,y
         inx
@@ -468,96 +475,100 @@ L23A9:  dey
         ldy     GetFileInfoModDate
         ldx     #0
 L23B2:  iny
-        lda     TicEditorFilename,x
+        lda     TicEditorFilename,x ; append Macros filename to macros file path
         beq     L23BE
-        sta     Pathname2Buffer,y
+        sta     MacrosFilePathnameBuffer,y
         inx
         bra     L23B2
 L23BE:  dey
-        sty     Pathname2Buffer
-        jsr     ProDOS::MLI
+        sty     MacrosFilePathnameBuffer
+        jsr     ProDOS::MLI ; open the config file
         .byte   ProDOS::COPEN
         .addr   OpenParams
-        bne     L2449
+        bne     AfterConfigFilesRead ; branch if didn't exist
         lda     OpenRefNum
         sta     ReadRefNum
         sta     CloseRefNum
         stz     GetFileInfoModDate
+        jsr     ProDOS::MLI ; read the config file
+        .byte   ProDOS::CREAD
+        .addr   ReadParams ; 2 bytes requested first
+        bne     CloseConfigFile
+        lda     MemoryMap::INBUF+1 ; save second byte read
+        sta     GetFileInfoModDate
+        lda     #$DD ; Read 221 more bytes
+        sta     ReadReqCount
         jsr     ProDOS::MLI
         .byte   ProDOS::CREAD
         .addr   ReadParams
-        bne     L23EF
-        lda     MemoryMap::INBUF+1
-        sta     GetFileInfoModDate
-        lda     #$DD
-        sta     ReadReqCount
-        jsr     ProDOS::MLI
-        dex
-        txs
-        rol     a
-L23EF:  jsr     ProDOS::MLI
+CloseConfigFile:
+        jsr     ProDOS::MLI ; close the config file
         .byte   ProDOS::CCLOSE
         .addr   CloseParams
-        lda     GetFileInfoModDate
-        beq     L2449
+        lda     GetFileInfoModDate ; was 2nd byte from file 0?
+        beq     AfterConfigFilesRead ; if yes, ignore file contents
         sta     SoftSwitch::SETALTZP
         lda     SoftSwitch::RWLCRAMB1
         lda     SoftSwitch::RWLCRAMB1
-        lda     GetFileInfoModDate
-        beq     L2443
+        lda     GetFileInfoModDate ; check 2nd byte again - printer slot #
+        beq     AfterPrinterConfigRead ; 0 - invalid
         cmp     #8
-        bge     L2443
-        sta     PrinterSlot
+        bge     AfterPrinterConfigRead ; >= 8 - invalid
+        sta     PrinterSlot ; save printer slot #
         ldy     #20
-L2411:  lda     ProDOS::SysPathBuf+$49,y
-        sta     Monitor::MAINID,y
+L2411:  lda     MemoryMap::INBUF+$C9,y ; read printer init string
+        sta     PrinterInitStringRawBytes,y ; from last 20 bytes of file
         dey
         bpl     L2411
         ldy     #1
         ldx     #1
-L241E:  lda     ProDOS::SysPathBuf+$49,y
-        cmp     #' '
-        bge     L2430
-        pha
+L241E:  lda     MemoryMap::INBUF+$C9,y ; create human readable version of
+        cmp     #' '                   ; printer init string by encoding
+        bge     L2430                  ; control characters as ^ + printable
+        pha                            ; character
         lda     #HICHAR('^')
         sta     PrinterInitString,x
         inx
         pla
         clc
-        adc     #$40
+        adc     #$40 ; convert control char to uppercase high ascii letter
 L2430:  ora     #%10000000
         sta     PrinterInitString,x
-        cpy     ProDOS::SysPathBuf+$49
+        cpy     MemoryMap::INBUF+$C9
         beq     L2440
         iny
         inx
         cpx     #20
         blt     L241E
-L2440:  stx     PrinterInitString
-L2443:  sta     SoftSwitch::SETSTDZP
+L2440:  stx     PrinterInitString ; update init string length
+AfterPrinterConfigRead:
+        sta     SoftSwitch::SETSTDZP
         lda     SoftSwitch::RDROMLCB1
-L2449:  jsr     ProDOS::MLI
+AfterConfigFilesRead:
+        jsr     ProDOS::MLI ; get the prefix
         .byte   ProDOS::CGETPREFIX
-        .addr   GetPrefixParams
-        bne     L249C
+        .addr   GetSetPrefixParams
+        bne     DiskErrorDuringInit
         lda     PrefixBuffer
-        bne     L24AF
+        bne     L24AF ; branch if prefix not empty
         lda     DocumentPath+1
         and     #%01111111
         cmp     #'/'
-        beq     L24AF
-        lda     ProDOS::DEVNUM
+        beq     L24AF ; branch if document path is absolute
+;;; Document path is relative, and there's no prefix. Assume it's
+;;; relative to the volume directory of the last accessed volume.
+        lda     ProDOS::DEVNUM ; Get volume name of current volume
         sta     OnLineUnitNum
         jsr     ProDOS::MLI
         .byte   ProDOS::ON_LINE
         .addr   OnLineParams
-        bne     L249C
+        bne     DiskErrorDuringInit
         lda     OnLineBuffer
         and     #%00001111
-        beq     L249C
-        sta     PrefixBuffer
-        inc     PrefixBuffer
-        ldy     #1
+        beq     DiskErrorDuringInit
+        sta     PrefixBuffer ; Copy it to PrefixBuffer,
+        inc     PrefixBuffer ; prepending and appending a slash
+        ldy     #1           ; as needed
         lda     #'/'
         sta     PrefixBuffer+1
         ldy     PrefixBuffer
@@ -568,11 +579,12 @@ L2449:  jsr     ProDOS::MLI
         lda     #'/'
         sta     PrefixBuffer,y
         sty     PrefixBuffer
-L2494:  jsr     ProDOS::MLI
+L2494:  jsr     ProDOS::MLI ; Set the prefix to this volume
         .byte   ProDOS::CSETPREFIX
         .addr   GetSetPrefixParams
         beq     L24AF
-L249C:  jsr     Monitor::HOME
+DiskErrorDuringInit:
+        jsr     Monitor::HOME
         ldy     #0
 L24A1:  lda     DiskErrorOccurredText,y
         beq     L24AC
@@ -582,9 +594,9 @@ L24A1:  lda     DiskErrorOccurredText,y
 L24AC:  jmp     WaitForKeypressAndQuit
 L24AF:  lda     ProDOS::MACHID
         lsr     a
-        bcs     L24B6
+        bcs     L24B6 ; Branch if clock/calendar card present
         iny
-L24B6:  sty     $E0 ; never read
+L24B6:  sty     $E0 ; meant to be clock/calendar flag? never read
 ;;; Search for mouse slot
         lda     #8
         sta     MouseSlot
@@ -609,7 +621,7 @@ L24D9:  sta     SoftSwitch::KBDSTRB
         lda     #>ResetHandler
         sta     Vector::SOFTEV+1
         jsr     Monitor::SETPWRC
-;;;  Copy zero page from main to aux mem.
+;;; Copy zero page from main to aux mem.
         ldy     #0
 L24EB:  sty     SoftSwitch::SETSTDZP
         lda     $00,y
@@ -674,8 +686,7 @@ GenerateLinePointerTables:
         jsr     GenerateLinePointerTable
         lda     DocumentPath
         bne     LoadInitialDocument
-        jmp     L25AD
-
+        jmp     StartWithEmptyDocument
 LoadInitialDocument:
         sta     SoftSwitch::SETSTDZP
         lda     SoftSwitch::RDROMLCB1
@@ -683,13 +694,13 @@ LoadInitialDocument:
         sta     GetFileInfoPathname
         lda     #>DocumentPath
         sta     GetFileInfoPathname+1
-        jsr     ProDOS::MLI
+        jsr     ProDOS::MLI ; get document info
         .byte   ProDOS::CGETFILEINFO
         .addr   GetFileInfoParams
-        bne     L25A4
+        bne     NoInitialDocument
         lda     GetFileInfoFileType
         cmp     #FileType::DIR
-        beq     L25A4
+        beq     NoInitialDocument ; can't open a directory
         lda     DocumentPath
         sta     ProDOS::SysPathBuf
         tay
@@ -698,20 +709,22 @@ L2596:  lda     DocumentPath,y
         dey
         bne     L2596
         lda     #$FF
-        sta     PathnameLength  ; what does this do?
-L25A4:  sta     SoftSwitch::SETALTZP
+        sta     PathnameLength ; set to nonzero to force load dialog
+NoInitialDocument:
+        sta     SoftSwitch::SETALTZP
         lda     SoftSwitch::RWLCRAMB1
         lda     SoftSwitch::RWLCRAMB1
-L25AD:  jsr     LoadFirstLinePointer
+StartWithEmptyDocument:
+        jsr     LoadFirstLinePointer
         jsr     MoveCursorToHomePos
-        jsr     SetDocumentLineCountToCurrentLine
-        lda     #$80                       ; storing a NUL byte as
-        sta     FirstLinePointerForMainMem ; the first character in the document?
-        ldy     DocumentPath
-L25BE:  lda     DocumentPath,y
+        jsr     SetDocumentLineCountToCurrentLine ; empty document
+        lda     #$80 ; empty line with CR
+        sta     FirstLinePointerForMainMem
+        ldy     DocumentPath ; copy DocumentPath
+@Loop:  lda     DocumentPath,y
         sta     PathnameBuffer,y
         dey
-        bpl     L25BE
+        bpl     @Loop
         jmp     MainEditorStart
 
 ;;; This creates a pointer table, starting at (Pointer), of length
@@ -1280,52 +1293,52 @@ ToggleShowCR:
 
 ClearToEndOfCurrentLine:
         jsr     IsCursorAtEndOfLine
-        bcc     LD2C6
+        bcc     LD2C6 ; nothing to do
         stz     DocumentChangedFlag
         jsr     GetLengthOfCurrentLine
-        and     #%10000000
+        and     #%10000000 ; preserve CR bit
         ora     CurrentCursorXPos
-        jsr     SetLengthOfCurrentLine
+        jsr     SetLengthOfCurrentLine ; truncate line
         jsr     IsOnFirstDocumentLine
-        beq     LD2C0
+        beq     LD2C0 ; yes - word wrap rest of line
         jsr     LoadPreviousLinePointer
         jsr     GetLengthOfCurrentLine
-        bmi     LD2BD
+        bmi     LD2BD ; branch if has CR
         and     #%01111111
         clc
-        adc     CurrentCursorXPos
-        cmp     LastEditableColumn
-        bge     LD2BD
+        adc     CurrentCursorXPos ; will the remaining text fit
+        cmp     LastEditableColumn ; on the previous line?
+        bge     LD2BD ; branch if no
         sta     CurrentCursorXPos
-        jsr     LF888
+        jsr     WordWrapUpToNextCR ; word wrap rest of line
         jsr     LoadNextLinePointer
         jsr     MoveToPreviousDocumentLine
         jmp     MainEditorRedrawDocument
-LD2BD:  jsr     LoadNextLinePointer
-LD2C0:  jsr     LF888
+LD2BD:  jsr     LoadNextLinePointer ; word wrap rest of line
+LD2C0:  jsr     WordWrapUpToNextCR
         jsr     MainEditorRedrawDocument
 LD2C6:  jmp     MainEditorInputLoop
 
 CarriageReturn:
         jsr     CheckIfMemoryFull
-        beq     LD2C6
+        beq     LD2C6 ; can't insert a new line
         stz     DocumentChangedFlag
         jsr     InsertNewLine
         jsr     IsCursorAtEndOfLine
-        bcc     LD2E1
-        beq     LD2E1
+        bcc     LD2E1 ; branch if yes
+        beq     LD2E1 ; branch if empty line
         ldy     CurrentCursorXPos
-        jsr     LF7A2
+        jsr     SplitLineAtCursor
 LD2E1:  stz     CurrentCursorXPos
         jsr     GetLengthOfCurrentLine
-        ora     #%10000000
+        ora     #%10000000 ; set CR flag
         jsr     SetLengthOfCurrentLine
         jsr     MoveToNextDocumentLine
         jsr     GetLengthOfCurrentLine
-        bne     LD2F9
-        ora     #%10000000
+        bne     LD2F9 ; branch if next line isn't empty
+        ora     #%10000000 ; set CR flag
         jsr     SetLengthOfCurrentLine
-LD2F9:  jsr     LF888
+LD2F9:  jsr     WordWrapUpToNextCR
         jmp     MainEditorRedrawDocument
 
 ;;; Process ordinary, non-command keypresses.
@@ -1349,9 +1362,9 @@ LD317:  ldy     CurrentCursorXPos
 LD322:  cmp     #' '
         bne     LD36E
 ;;; see if the word just completed would fit on the previous line?
-        jsr     LF954
+        jsr     GetSpaceLeftOnPreviousLine
         cmp     CurrentCursorXPos
-        blt     LD36E
+        blt     LD36E ; no...won't fit
 ;;;  copy text up to cursor in current line into INBUF
         ldy     CurrentCursorXPos
 LD331:  jsr     GetCharAtYInCurrentLine
@@ -1379,10 +1392,10 @@ LD354:  iny
         tya
         jsr     SetLengthOfCurrentLine
         jsr     LoadNextLinePointer
-        jsr     LF888
+        jsr     WordWrapUpToNextCR
         jmp     MainEditorRedrawDocument
 LD36E:  jmp     MainEditorRedrawCurrentLine
-LD371:  jsr     LF74B
+LD371:  jsr     PadLineWithSpacesUpToCursor
 LD374:  ldy     CurrentCursorXPos
         cpy     LastEditableColumn
         bge     LD386
@@ -1405,7 +1418,7 @@ LD394:  jsr     GetCharAtYInCurrentLine
         and     #%01111111
         bra     LD3B0
 LD3A5:  sty     CurrentCursorXPos
-        jsr     LF7A2
+        jsr     SplitLineAtCursor
         jsr     GetLengthOfCurrentLine
         and     #%01111111
 LD3B0:  jsr     SetLengthofCurrentLine
@@ -1418,7 +1431,7 @@ LD3B0:  jsr     SetLengthofCurrentLine
         pla
         jsr     SetCharAtYInCurrentLine
         sty     CurrentCursorXPos
-        jsr     LF888
+        jsr     WordWrapUpToNextCR
         jmp     MainEditorRedrawDocument
 ;;; Insert mode
 LD3CD:  jsr     GetLengthOfCurrentLine
@@ -1450,7 +1463,7 @@ LD401:  jsr     CheckIfMemoryFull
         beq     LD435
         jsr     MoveWordToNextLine
         jsr     MoveToNextDocumentLine
-        jsr     LF888
+        jsr     WordWrapUpToNextCR
         jsr     DisplayAllVisibleDocumentLines
         jsr     MoveToPreviousDocumentLine
         jsr     IsCursorAtEndOfLine
@@ -1482,7 +1495,7 @@ LD441:  jsr     IsCursorAtEndOfLine
         bpl     LD465
         and     #%01111111
         jsr     SetLengthOfCurrentLine
-LD45A:  jsr     LF888
+LD45A:  jsr     WordWrapUpToNextCR
         beq     LD462
         jmp     MainEditorRedrawDocument
 LD462:  jmp     MainEditorRedrawCurrentLine
@@ -1505,7 +1518,7 @@ LD480:  iny
         cpy     ScratchVal4
         blt     LD480
 LD48E:  sty     ScratchVal4
-        jsr     LF954
+        jsr     GetSpaceLeftOnPreviousLine
         cmp     ScratchVal4
         blt     LD45A
         beq     LD45A
@@ -1629,7 +1642,7 @@ LD588:  lda     CurLinePtr
         jsr     DisplayLineAndColLabels
         jmp     ClearCurrentLine
 LD5AF:  stz     DocumentChangedFlag
-        lda     #<TD964         ; "Please Wait.."
+        lda     #<TD964 ; "Please Wait.."
         ldx     #>TD964
         jsr     DisplayStringInStatusLine
         lda     CurrentLineNumber+1
@@ -1705,7 +1718,7 @@ LD667:  jmp     MainEditor
 
 ;;;  Copy text to/from clipboard
 CopyToOrFromClipboard:
-        lda     #<TD5D0         ; "Copy to or from..."
+        lda     #<TD5D0 ; "Copy to or from..."
         ldx     #>TD5D0
         jsr     DisplayStringInStatusLineWithEscToGoBack
 LD671:  jsr     GetKeypress
@@ -1726,7 +1739,7 @@ LD687:  lda     DataBuffer
         lda     DataBuffer+2
         cmp     #$FF
         beq     LD6A7
-LD69A:  lda     #<TD5F8         ; "Clipboard is empty"
+LD69A:  lda     #<TD5F8 ; "Clipboard is empty"
         ldx     #>TD5F8
         jsr     DisplayStringInStatusLineWithEscToGoBack
         jsr     BeepAndWaitForReturnOrEscKey
@@ -1802,10 +1815,10 @@ LD732:  jsr     GetCharAtYInCurrentLine
 LD743:  inc     Pointer5+1
 LD745:  inc     DataBuffer
         lda     Pointer5+1
-        cmp     #$BB            ; last pointer (hi byte)
+        cmp     #>LastLinePointer
         blt     LD754
         lda     Pointer5
-        cmp     #$B0            ; last pointer (lo byte)
+        cmp     #<LastLinePointer
         bge     LD771
 LD754:  lda     CurrentLineNumber+1
         cmp     SavedCurrentLineNumber+1
@@ -1818,7 +1831,7 @@ LD766:  jsr     LoadNextLinePointer
         bra     LD72C
 LD76B:  jsr     RestoreCurrentLineState2
         jmp     LD6EE
-LD771:  lda     #<TD60C         ; "Clipboard is full"
+LD771:  lda     #<TD60C ; "Clipboard is full"
         ldx     #>TD60C
         jsr     DisplayStringInStatusLineWithEscToGoBack
         jsr     BeepAndWaitForReturnOrEscKey
@@ -1828,7 +1841,7 @@ LD77D:  .byte   $00
 ;;; display "please wait" and load Pointer5 with beginning
 ;;; of clipboard data
 DisplayPleaseWaitForClipboard:
-        lda     #<TD964         ; "Please wait.."
+        lda     #<TD964 ; "Please wait.."
         ldx     #>TD964
         jsr     DisplayStringInStatusLine
         lda     #<DataBuffer+3
@@ -1842,7 +1855,7 @@ EditTabStops:
         sta     ScratchVal1
         lda     #24
         sta     ZeroPage::WNDBTM
-        lda     #<TD6A2         ; Tab stop editing instructions
+        lda     #<TD6A2 ; Tab stop editing instructions
         ldx     #>TD6A2
         jsr     DisplayStringInStatusLine
 ;;; draw ruler with tab stops
@@ -1954,7 +1967,7 @@ ShowHelpScreen:
 
 SearchForString:
         jsr     SaveCursorPosInDocument
-        lda     #<TD59E         ; "Search for:"
+        lda     #<TD59E ; "Search for:"
         ldx     #>TD59E
         jsr     DisplayStringInStatusLineWithEscToGoBack
         ldy     SearchText ; copy current search text
@@ -1977,7 +1990,7 @@ LD8AD:  lda     ProDOS::SysPathBuf,x
         sta     SearchText,x
         dex
         bne     LD8AD
-        lda     #<TD5AA         ; "Searching..."
+        lda     #<TD5AA ; "Searching..."
         ldx     #>TD5AA
         jsr     DisplayStringInStatusLine
         jsr     RestoreCursorPosOnScreen
@@ -2043,7 +2056,7 @@ LD933:  ply
         jsr     SaveCursorPosInDocument
         bra     LD948
 ;;; Didn't find the string.
-LD93E:  lda     #<TD5B8         ; "Not found"
+LD93E:  lda     #<TD5B8 ; "Not found"
         ldx     #>TD5B8
         jsr     DisplayStringInStatusLine
         jsr     BeepAndWaitForReturnOrEscKey
@@ -2080,7 +2093,7 @@ MoveToNextVisibleLine:
         rts
 
 StartMenuNavigationAtMenuItem:
-        sta     MenuNumber      ; menu #
+        sta     MenuNumber ; menu #
         stx     MenuItemNumber ; menu item #
         lda     #$FF
         sta     MenuItemSelectedFlag
@@ -2097,7 +2110,7 @@ LD98C:  lda     #HICHAR(ControlChar::Return)
         sta     MousePosMax
         lda     #StartingMousePos-23
         sta     MousePosMin
-LD99B:  lda     #<TD65C         ; "Use arrows/mouse to select an option..."
+LD99B:  lda     #<TD65C ; "Use arrows/mouse to select an option..."
         ldx     #>TD65C
         jsr     DisplayStringInStatusLineWithEscToGoBack
         jsr     SaveScreenAreaUnderMenus
@@ -2119,13 +2132,13 @@ LD9B4:  ldy     #StatusLine
         jmp     (MenuNavigationKeypressHandlerTable,x)
 
 MenuNavigationKeypressHandlerTable:
-        .addr   InvalidMenuKey           ; any other key
-        .addr   SelectMenuItem           ; Return
-        .addr   InvalidMenuKey           ; Space
-        .addr   MoveToPreviousMenu       ; Left arrow
-        .addr   MoveToNextMenu           ; Right arrow
-        .addr   MoveToPreviousMenuItem   ; Up Arrow
-        .addr   MoveToNextMenuItem       ; Down Arrow
+        .addr   InvalidMenuKey         ; any other key
+        .addr   SelectMenuItem         ; Return
+        .addr   InvalidMenuKey         ; Space
+        .addr   MoveToPreviousMenu     ; Left arrow
+        .addr   MoveToNextMenu         ; Right arrow
+        .addr   MoveToPreviousMenuItem ; Up Arrow
+        .addr   MoveToNextMenuItem     ; Down Arrow
 
 ;;; Removes a menu after a menu selection triggered the display of
 ;;; a dialog box (in which case the menu is still on-screen)
@@ -2134,7 +2147,7 @@ CleanUpAfterMenuSelection: ; $D9D6
         jsr     DrawMenuBarAndMenuTitles
         lda     #HICHAR(ControlChar::Esc)
         sta     CursorMovementControlChars+4
-;;; set mouse tracking speed to fast
+;;; Set mouse tracking speed to fast
         lda     #StartingMousePos+3
         sta     MousePosMax
         lda     #StartingMousePos-3
@@ -2152,8 +2165,7 @@ MoveToPreviousMenuItem:
         ldy     MenuNumber
         lda     MenuLengths,y
         dec     a
-LD9FC:
-        sta     MenuItemNumber
+LD9FC:  sta     MenuItemNumber
         bra     LD9AD
 
 MoveToNextMenuItem:
@@ -2203,12 +2215,12 @@ SelectMenuItem:
 ShowVolumesDialog:
 ;;;  Draw Volumes Online dialog
         jsr     DrawDialogBox
-        .byte   17              ; height
-        .byte   35              ; width
-        .byte   4               ; y-coord
-        .byte   36              ; x-coord
-        .byte   46              ; x-coord of title
-        .addr   TDCCC           ; "Volumes Online"
+        .byte   17 ; height
+        .byte   35 ; width
+        .byte   4  ; y-coord
+        .byte   36 ; x-coord
+        .byte   46 ; x-coord of title
+        .addr   TDCCC ; "Volumes Online"
         lda     #ProDOS::CONLINE
         ldx     #<EditorOnLineParams
         ldy     #>EditorOnLineParams
@@ -2281,22 +2293,22 @@ PrintFile:
 
 ShowQuitDialog:
         jsr     DrawDialogBox
-        .byte   7
-        .byte   36
-        .byte   5
-        .byte   32
-        .byte   48
-        .addr   TD741           ; "Quit"
+        .byte   7  ; height
+        .byte   36 ; width
+        .byte   5  ; y-coord
+        .byte   32 ; x-coord
+        .byte   48 ; x-coord of title
+        .addr   TD741 ; "Quit"
         ldy     #7
         ldx     #38
         jsr     SetCursorPosToXY
-        lda     #<TD748         ; Q - Quit...
+        lda     #<TD748 ; Q - Quit...
         ldx     #>TD748
         jsr     DisplayMSB1String
         ldy     #8
         ldx     #38
         jsr     SetCursorPosToXY
-        lda     #<TD761         ; E - Exit ...
+        lda     #<TD761 ; E - Exit ...
         ldx     #>TD761
         jsr     DisplayMSB1String
         ldx     #50
@@ -2307,7 +2319,7 @@ LDB0D:  jsr     PlayTone
         ldx     #1
         jsr     GetSpecificKeypress
         bcs     LDB4E
-        ora     #%10000000      ; set MSB
+        ora     #%10000000 ; set MSB
         and     #ToUpperCaseANDMask
         cmp     #HICHAR('E')
         beq     @Exit
@@ -2334,12 +2346,12 @@ LDB4E:  jmp     CleanUpAfterMenuSelection
 
 ShowAboutBox:
         jsr     DrawDialogBox
-        .byte   14
-        .byte   60
-        .byte   6
-        .byte   10
-        .byte   36
-        .addr   TD99A           ; "Ed-It!"
+        .byte   14 ; height
+        .byte   60 ; width
+        .byte   6  ; x-coord
+        .byte   10 ; y-coord
+        .byte   36 ; x-coord of title
+        .addr   TD99A ; "Ed-It!"
         ldy     #8
         ldx     #23
         jsr     SetCursorPosToXY
@@ -2351,7 +2363,7 @@ ShowAboutBox:
         ldy     #9
         ldx     #27
         jsr     SetCursorPosToXY
-        lda     #<TD9A3         ; about box text
+        lda     #<TD9A3 ; about box text
         ldx     #>TD9A3
         jsr     DisplayMSB1String
         ldy     #10
@@ -2361,32 +2373,32 @@ ShowAboutBox:
         ldy     #11
         ldx     #34
         jsr     SetCursorPosToXY
-        lda     #<TD9C1         ; about box text
+        lda     #<TD9C1 ; about box text
         ldx     #>TD9C1
         jsr     DisplayMSB1String
         lda     #29
         sta     Columns80::OURCH
-        lda     #<TD9D1         ; about box text
+        lda     #<TD9D1 ; about box text
         ldx     #>TD9D1
         jsr     DisplayMSB1String
         lda     #29
         sta     Columns80::OURCH
-        lda     #<TDA36         ; about box text
+        lda     #<TDA36 ; about box text
         ldx     #>TDA36
         jsr     DisplayMSB1String
         lda     #29
         sta     Columns80::OURCH
-        lda     #<TDA4D         ; about box text
+        lda     #<TDA4D ; about box text
         ldx     #>TDA4D
         jsr     DisplayMSB1String
         lda     #29
         sta     Columns80::OURCH
-        lda     #<TD9EA         ; about box text
+        lda     #<TD9EA ; about box text
         ldx     #>TD9EA
         jsr     DisplayMSB1String
         lda     #16
         sta     Columns80::OURCH
-        lda     #<TDA02         ; about box text
+        lda     #<TDA02 ; about box text
         ldx     #>TDA02
         jsr     DisplayMSB1String
         jsr     WaitForSpaceToContinueInStatusLine
@@ -2401,7 +2413,7 @@ ListDirectory:
         jmp     CleanUpAfterMenuSelection
 
 ShowSetPrefixDialog:
-        lda     #<TD773         ; "New Prefix"
+        lda     #<TD773 ; "New Prefix"
         ldx     #>TD773
         jsr     DisplayPathInputBox
         ldy     #15
@@ -2418,7 +2430,7 @@ LDBFC:  lda     PrefixBuffer,y
 LDC05:  ldy     #16
         ldx     #28
         jsr     SetCursorPosToXY
-        lda     #<TD780         ; "Press OA-S for Slot/Drive"
+        lda     #<TD780 ; "Press OA-S for Slot/Drive"
         ldx     #>TD780
         jsr     DisplayMSB1String
 LDC13:  ldy     #12
@@ -2444,7 +2456,7 @@ LDC33:  stz     EditorOnLineUnitNum
         jsr     OutputSpaces
         ldx     #31
         stx     Columns80::OURCH
-        lda     #<TD799         ; "Slot?"
+        lda     #<TD799 ; "Slot?"
         ldx     #>TD799
         jsr     DisplayMSB1String
         bra     LDC53
@@ -2464,7 +2476,7 @@ LDC53:  jsr     GetKeypress
         sta     EditorOnLineUnitNum
         lda     #44
         sta     Columns80::OURCH
-        lda     #<TD79F         ; "Drive?"
+        lda     #<TD79F ; "Drive?"
         ldx     #>TD79F
         jsr     DisplayMSB1String
 LDC78:  jsr     GetKeypress
@@ -2550,12 +2562,12 @@ LoadFile:
 
 ShowChangeMouseStatusDialog:
         jsr     DrawDialogBox
-        .byte   9
-        .byte   40
-        .byte   9
-        .byte   20
-        .byte   30
-        .addr   TDDC7           ; "Change Mouse Status"
+        .byte   9  ; height
+        .byte   40 ; width
+        .byte   9  ; y-coord
+        .byte   20 ; x-coord
+        .byte   30 ; x-coord of title
+        .addr   TDDC7 ; "Change Mouse Status"
         ldy     #13
         ldx     #23
         jsr     DrawAbortButton
@@ -2567,7 +2579,7 @@ ShowChangeMouseStatusDialog:
         jsr     SetCursorPosToXY
         lda     MouseSlot
         beq     LDD61
-        lda     #<TD8BB         ; "Turn OFF mouse?"
+        lda     #<TD8BB ; "Turn OFF mouse?"
         ldx     #>TD8BB
         jsr     DisplayMSB1String
         jsr     DisplayHitEscToEditDocInStatusLine
@@ -2579,7 +2591,7 @@ ShowChangeMouseStatusDialog:
 LDD5E:  jmp     CleanUpAfterMenuSelection
 LDD61:  lda     SavedMouseSlot
         beq     LDD7D
-        lda     #<TD8CB         ; "Turn ON Mouse?"
+        lda     #<TD8CB ; "Turn ON Mouse?"
         ldx     #>TD8CB
         jsr     DisplayMSB1String
         jsr     DisplayHitEscToEditDocInStatusLine
@@ -2588,7 +2600,7 @@ LDD61:  lda     SavedMouseSlot
         lda     SavedMouseSlot
         sta     MouseSlot
         jmp     CleanUpAfterMenuSelection
-LDD7D:  lda     #<TD8A7         ; "No mouse in system!"
+LDD7D:  lda     #<TD8A7 ; "No mouse in system!"
         ldx     #>TD8A7
         jsr     DisplayMSB1String
         jsr     DisplayHitEscToEditDocInStatusLine
@@ -2596,7 +2608,7 @@ LDD7D:  lda     #<TD8A7         ; "No mouse in system!"
         jmp     CleanUpAfterMenuSelection
 
 ChangeBlinkRate:
-        lda     #<TD8DA         ; "Enter new rate..."
+        lda     #<TD8DA ; "Enter new rate..."
         ldx     #>TD8DA
         ldy     CursorBlinkRate
         jsr     InputSingleDigitDefaultInY
@@ -2608,16 +2620,16 @@ LDD9F:  jmp     CleanUpAfterMenuSelection
 
 ShowClearMemoryDialog:
         jsr     DrawDialogBox
-        .byte   7
-        .byte   40
-        .byte   6
-        .byte   25
-        .byte   39
-        .addr   TD974           ; "Clear Memory"
+        .byte   7  ; height
+        .byte   40 ; width
+        .byte   6  ; y-coord
+        .byte   25 ; x-coord
+        .byte   39 ; x-coord of title
+        .addr   TD974 ; "Clear Memory"
         ldy     #8
         ldx     #32
         jsr     SetCursorPosToXY
-        lda     #<TD983         ; "Erase memory contents?"
+        lda     #<TD983 ; "Erase memory contents?"
         ldx     #>TD983
         jsr     DisplayMSB1String
         ldy     #10
@@ -2650,14 +2662,14 @@ SetLineLengthPrompt:
         jsr     GetLengthOfCurrentLine
         and     #%01111111
         beq     LDE0F
-LDE00:  lda     #<TD90F         ; "You MUST clear file in memory..."
+LDE00:  lda     #<TD90F ; "You MUST clear file in memory..."
         ldx     #>TD90F
         jsr     DisplayStringInStatusLineWithEscToGoBack
         jsr     PlayTone
         jsr     WaitForSpaceKeypress
         bra     LDE88
 LDE0F:  jsr     MoveCursorToHomePos
-LDE12:  lda     #<TD8F0         ; "Enter new line length"
+LDE12:  lda     #<TD8F0 ; "Enter new line length"
         ldx     #>TD8F0
         jsr     DisplayStringInStatusLineWithEscToGoBack
         lda     DocumentLineLength ; default input is current length
@@ -2742,14 +2754,15 @@ LDEBC:  and     #ToUpperCaseANDMask
         beq     LDECB
         jsr     PlayTone
         bra     LDEB1
-LDECB:  jsr     LDED8
+LDECB:  jsr     SaveMacrosToFile
 LDECE:  jmp     CleanUpAfterMenuSelection
 LDED1:  and     #%00001111 ; to digit
         jsr     EditMacro
         bra     LDEA4
-;;; Save macros to file
-LDED8:  ldy     Pathname2Buffer
-LDEDB:  lda     Pathname2Buffer,y
+
+SaveMacrosToFile:
+        ldy     MacrosFilePathnameBuffer
+LDEDB:  lda     MacrosFilePathnameBuffer,y
         sta     ProDOS::SysPathBuf,y
         dey
         bpl     LDEDB
@@ -2944,7 +2957,7 @@ DrawMenuTitles:
         dec     MenuDrawingIndex
         beq     LE05F
         jsr     SetMaskForInverseText
-LE05F:  lda     #<TDCDD         ; "File"
+LE05F:  lda     #<TDCDD ; "File"
         ldx     #>TDCDD
         jsr     DisplayMSB1String
         jsr     SetMaskForNormalText
@@ -2953,7 +2966,7 @@ LE05F:  lda     #<TDCDD         ; "File"
         dec     MenuDrawingIndex
         beq     LE076
         jsr     SetMaskForInverseText
-LE076:  lda     #<TDCE4         ; "Utilities"
+LE076:  lda     #<TDCE4 ; "Utilities"
         ldx     #>TDCE4
         jsr     DisplayMSB1String
         jsr     SetMaskForNormalText
@@ -2962,7 +2975,7 @@ LE076:  lda     #<TDCE4         ; "Utilities"
         dec     MenuDrawingIndex
         beq     LE08D
         jsr     SetMaskForInverseText
-LE08D:  lda     #<TDCF0         ; "Options"
+LE08D:  lda     #<TDCF0 ; "Options"
         ldx     #>TDCF0
         jsr     DisplayMSB1String
         jsr     SetMaskForNormalText
@@ -2970,16 +2983,16 @@ LE08D:  lda     #<TDCF0         ; "Options"
 
 ShowListDirectoryDialog:
         jsr     DrawDialogBox
-        .byte   14
-        .byte   69
-        .byte   6
-        .byte   4
-        .byte   32
-        .addr   TDC19           ; "Directory"
+        .byte   14 ; height
+        .byte   69 ; width
+        .byte   6  ; y-coord
+        .byte   4  ; x-coord
+        .byte   32 ; x-coord of title
+        .addr   TDC19 ; "Directory"
         ldy     #8
         ldx     #6
         jsr     SetCursorPosToXY
-        lda     #<TDC25         ; MouseText folder
+        lda     #<TDC25 ; MouseText folder
         ldx     #>TDC25
         jsr     DisplayMSB1String
         ldx     #1
@@ -2998,10 +3011,10 @@ LE0B5:  lda     PrefixBuffer,x
         ldy     #10
         ldx     #6
         jsr     SetCursorPosToXY
-        lda     #<TDC29         ; File list column headers
+        lda     #<TDC29 ; File list column headers
         ldx     #>TDC29
         jsr     DisplayMSB1String
-        lda     #<TDC54         ; More file list column headers
+        lda     #<TDC54 ; More file list column headers
         ldx     #>TDC54
         jsr     DisplayMSB1String
         ldy     #11
@@ -3018,21 +3031,21 @@ LE0B5:  lda     PrefixBuffer,x
         ldx     #57
         jsr     SetCursorPosToXY
         jsr     OutputLeftVerticalBar
-        lda     #<TDC69         ; "Total:"
+        lda     #<TDC69 ; "Total:"
         ldx     #>TDC69
         jsr     DisplayMSB1String
         ldy     #13
         ldx     #57
         jsr     SetCursorPosToXY
         jsr     OutputLeftVerticalBar
-        lda     #<TDC71         ; "Used:"
+        lda     #<TDC71 ; "Used:"
         ldx     #>TDC71
         jsr     DisplayMSB1String
         ldy     #14
         ldx     #57
         jsr     SetCursorPosToXY
         jsr     OutputLeftVerticalBar
-        lda     #<TDC79         ; "Free:"
+        lda     #<TDC79 ; "Free:"
         ldx     #>TDC79
         jsr     DisplayMSB1String
         ldy     #15
@@ -3047,14 +3060,14 @@ LE0B5:  lda     PrefixBuffer,x
         ldx     #57
         jsr     SetCursorPosToXY
         jsr     OutputLeftVerticalBar
-        lda     #<TDC81         ; "Use <SPACE> to"
+        lda     #<TDC81 ; "Use <SPACE> to"
         ldx     #>TDC81
         jsr     DisplayMSB1String
         ldy     #18
         ldx     #57
         jsr     SetCursorPosToXY
         jsr     OutputLeftVerticalBar
-        lda     #<TDC90         ; "continue"
+        lda     #<TDC90 ; "continue"
         ldx     #>TDC90
         jsr     DisplayMSB1String
         ldy     #19
@@ -3170,7 +3183,7 @@ LE26A:  ldy     #50
         sta     Columns80::OURCH
         dec     ScratchVal3
         bne     LE26A
-LE27C:  lda     #<TDC9C         ; "Directory complete..."
+LE27C:  lda     #<TDC9C ; "Directory complete..."
         ldx     #>TDC9C
         jsr     DisplayStringInStatusLine
         jsr     GetKeypress
@@ -3193,11 +3206,11 @@ LE2A2:  lda     DocumentChangedFlag
         beq     LE2AA ; branch if document has unsaved changes
 LE2A7:  jmp     LE30C ; skip offering to save current document
 LE2AA:  jsr     DrawDialogBox
-        .byte   12
-        .byte   56
-        .byte   9
-        .byte   11
-        .byte   35
+        .byte   12 ; height
+        .byte   56 ; width
+        .byte   9  ; y-coord
+        .byte   11 ; x-coord
+        .byte   35 ; x-coord of title
         .addr   TDA88 ; "Load File"
         ldy     #12
         ldx     #20
@@ -3236,7 +3249,7 @@ LE303:  jsr     ShowSaveAsDialog
         bcc     LE309 ; if save successful, continue to load
 LE308:  rts
 LE309:  stz     PathnameLength
-LE30C:  lda     #<TDA88         ; "Load File"
+LE30C:  lda     #<TDA88 ; "Load File"
         ldx     #>TDA88
         jsr     DisplayPathInputBox
         lda     #'L'
@@ -3246,7 +3259,7 @@ LE30C:  lda     #<TDA88         ; "Load File"
         ldy     #17
         ldx     #25
         jsr     SetCursorPosToXY
-        lda     #<TD7D4         ; "OA-L or click mouse to List Files"
+        lda     #<TD7D4 ; "OA-L or click mouse to List Files"
         ldx     #>TD7D4
         jsr     DisplayMSB1String
         stz     ProDOS::SysPathBuf
@@ -3282,7 +3295,7 @@ LE369:  lda     ProDOS::SysPathBuf,y
         bpl     LE369
         jsr     OpenFile
         bne     LE353
-        lda     #<TDBFF         ; "Loading..."
+        lda     #<TDBFF ; "Loading..."
         ldx     #>TDBFF
         jsr     DisplayLoadingOrSavingMessage
         jsr     ClearStatusLine
@@ -3295,7 +3308,8 @@ LE369:  lda     ProDOS::SysPathBuf,y
         sta     EditorReadWriteBufferAddr+1
         jsr     LoadFirstLinePointer ; start first line
         jsr     SetDocumentLineCountToCurrentLine
-LE399:  lda     #0
+ReadNextLineFromFile:
+        lda     #0
         jsr     SetLengthOfCurrentLine
 ProcessNextCharFromFile:
         lda     #ProDOS::CREAD
@@ -3374,7 +3388,7 @@ LE427:  jsr     GetLengthOfCurrentLine
         beq     DoneReadingFile
         jsr     LoadNextLinePointer
         jsr     IncrementDocumentLineCount
-        jmp     LE399
+        jmp     ReadNextLineFromFile
 LE43D:  cmp     #ProDOS::EEOF
         bne     ErrorLoadingFile
 ;;; done loading file (or memory full)
@@ -3423,13 +3437,13 @@ LE48E:  lda     PrefixBuffer,y
         ldy     PrefixBuffer
         dey
         sty     ProDOS::SysPathBuf
-        lda     #<TDAAA         ; "Enter new prefix above..."
+        lda     #<TDAAA ; "Enter new prefix above..."
         ldx     #>TDAAA
         jsr     DisplayStringInStatusLine
         ldy     #15
         ldx     #3
         jsr     SetCursorPosToXY
-        lda     #<TD7B8         ; "Prefix:/"
+        lda     #<TD7B8 ; "Prefix:/"
         ldx     #>TD7B8
         jsr     DisplayMSB1String
         ldy     #15
@@ -3463,13 +3477,13 @@ LE4DD:  lda     ProDOS::SysPathBuf-1,y
 LE4F7:  rts
 
 ShowSaveAsDialog:
-        lda     #<TD7A6         ; "Save File"
+        lda     #<TD7A6 ; "Save File"
         ldx     #>TD7A6
         jsr     DisplayPathInputBox
         ldy     #17
         ldx     #23
         jsr     SetCursorPosToXY
-        lda     #<TD883         ; "Use OA-Ret to save with Ret on each line"
+        lda     #<TD883 ; "Use OA-Ret to save with Ret on each line"
         ldx     #>TD883
         jsr     DisplayMSB1String
         ldy     PathnameBuffer
@@ -3500,7 +3514,7 @@ LE541:  ldy     #$FF
         .byte   OpCode::BIT_Abs
 LE544:  ldy     #0
         sty     SaveCRAtEndOfEachLineFlag
-        lda     #<TDBE6         ; "Saving..."
+        lda     #<TDBE6 ; "Saving..."
         ldx     #>TDBE6
         jsr     DisplayLoadingOrSavingMessage
         jsr     ClearStatusLine
@@ -3518,7 +3532,7 @@ LE55F:  lda     EditorGetFileInfoFileType
 LE56F:  ldy     #StatusLine
         ldx     #0
         jsr     SetCursorPosToXY
-        lda     #<TDA65         ; "Replace old version of file?"
+        lda     #<TDA65 ; "Replace old version of file?"
         ldx     #>TDA65
         jsr     DisplayMSB1String
         jsr     PlayTone
@@ -3778,13 +3792,13 @@ DisplayPathInputBox:
         ldy     #12
         ldx     #3
         jsr     SetCursorPosToXY
-        lda     #<TD7B2         ; "Path:"
+        lda     #<TD7B2 ; "Path:"
         ldx     #>TD7B2
         jsr     DisplayMSB1String
         ldy     #15
         ldx     #3
         jsr     SetCursorPosToXY
-        lda     #<TD7B8         ; "Prefix:/"
+        lda     #<TD7B8 ; "Prefix:/"
         ldx     #>TD7B8
         jsr     DisplayMSB1String
         ldy     #15
@@ -3802,7 +3816,7 @@ DisplayPathInputBox:
         jsr     DisplayHitEscToEditDocInStatusLine
         ldy     #61
         sty     Columns80::OURCH
-        lda     #<TD7C1         ; "OA-N for New Prefix"
+        lda     #<TD7C1 ; "OA-N for New Prefix"
         ldx     #>TD7C1
         jsr     DisplayMSB1String
         rts
@@ -3828,7 +3842,7 @@ LE7C9:  tya
         tax
         lda     MLIErrorMessageTable,y
         jsr     DisplayMSB1String
-        lda     #<TDE09         ; "Press a key"
+        lda     #<TDE09 ; "Press a key"
         ldx     #>TDE09
         jsr     DisplayMSB1String
         jsr     PlayTone
@@ -3842,16 +3856,16 @@ ShowDirectoryListingDialog:
         lda     #$FF
         sta     DocumentChangedFlag
         jsr     DrawDialogBox
-        .byte   12
-        .byte   44
-        .byte   9
-        .byte   17
-        .byte   34
-        .addr   TD83D           ; "Select File"
+        .byte   12 ; height
+        .byte   44 ; width
+        .byte   9  ; y-coord
+        .byte   17 ; x-coord
+        .byte   34 ; x-coord of title
+        .addr   TD83D ; "Select File"
         ldy     #10
         ldx     #19
         jsr     SetCursorPosToXY
-        lda     #<TDC29         ; File list column headers
+        lda     #<TDC29 ; File list column headers
         ldx     #>TDC29
         jsr     DisplayMSB1String
         ldy     #11
@@ -3859,7 +3873,7 @@ ShowDirectoryListingDialog:
         jsr     SetCursorPosToXY
         ldy     #44
         jsr     OutputHorizontalLineX
-        lda     #<TD84B         ; "Use up/down to select..."
+        lda     #<TD84B ; "Use up/down to select..."
         ldx     #>TD84B
         jsr     DisplayStringInStatusLine
         ldy     PrefixBuffer
@@ -3912,7 +3926,7 @@ LE890:  jsr     CloseFile
         lda     DocumentLineCount
         ora     DocumentLineCount+1
         bne     LE8AA
-        lda     #<TD86C         ; "NO files; press a key."
+        lda     #<TD86C ; "NO files; press a key."
         ldx     #>TD86C
         jsr     DisplayStringInStatusLine
         jsr     PlayTone
@@ -4107,7 +4121,7 @@ LEA21:  sta     MemoryMap::INBUF+1,x
         dex
         dey
         bpl     LEA21
-;;; output file type (known)
+;;; output known file type (3-char type)
         ldy     #0
 LEA2A:  lda     FileTypeTable,y
         beq     LEA3A
@@ -4118,7 +4132,7 @@ LEA2A:  lda     FileTypeTable,y
         iny
         iny
         bra     LEA2A
-;;; output filetype (unknown)
+;;; output unknown filetype (hex value)
 LEA3A:  lda     #HICHAR('$')
         sta     MemoryMap::INBUF+$12
         lda     ProDOS::SysPathBuf+$10
@@ -4279,7 +4293,7 @@ LEB44:  bra     LEB10
 LEB46:  lda     ZeroPage::CV
 LEB48:  bra     ComputeTextOutputPos
 MoveTextOutputPosToStartOfNextLine:
-LEB4A:  stz     Columns80::OURCH
+        stz     Columns80::OURCH
         lda     ZeroPage::CV
         inc     a
 
@@ -4467,7 +4481,7 @@ LEC89:  dec     MacroRemainingLength
         rts
 ;;; Keyboard & mouse input, blinking cursor
 ;;; Returns KeyModReg in X
-LEC90:  jsr     LEB46
+LEC90:  jsr     LEB46 ; TODO: define label
         jsr     ReadCharFromScreen
         sta     CharUnderCursor
         lda     CurrentCursorChar
@@ -4835,7 +4849,7 @@ LEF3E:  jsr     RestoreCurrentLineState2
         rts
 
 DisplayDefaultStatusText:
-        Lda     #<TD61F         ; "Enter text or use OA-cmds..."
+        Lda     #<TD61F ; "Enter text or use OA-cmds..."
         ldx     #>TD61F
         jmp     DisplayStringInStatusLine
 
@@ -4843,7 +4857,7 @@ DisplayHelpKeyCombo:
         ldx     #67
         ldy     #StatusLine
         jsr     SetCursorPosToXY
-        lda     #<TD591         ; "OA-? for Help"
+        lda     #<TD591 ; "OA-? for Help"
         ldx     #>TD591
         jsr     DisplayMSB1String
         rts
@@ -4852,7 +4866,7 @@ DisplayLineAndColLabels:
         ldy     #StatusLine
         ldx     #44
         jsr     SetCursorPosToXY
-        lda     #<TD649         ; Line / Col
+        lda     #<TD649 ; Line / Col
         ldx     #>TD649
         jsr     DisplayMSB1String
         rts
@@ -4950,7 +4964,7 @@ DrawAbortButton:
         ldy     ScreenYCoord
         iny
         jsr     SetCursorPosToXY
-        lda     #<TD6EE         ; Abort - Esc
+        lda     #<TD6EE ; Abort - Esc
         ldx     #>TD6EE
         jsr     DisplayMSB1String
         jsr     SetMaskForNormalText
@@ -4963,7 +4977,7 @@ DrawAcceptButton:
         ldy     ScreenYCoord
         iny
         jsr     SetCursorPosToXY
-        lda     #<TD6FD         ; Accept - Return
+        lda     #<TD6FD ; Accept - Return
         ldx     #>TD6FD
         jsr     DisplayMSB1String
         jsr     SetMaskForNormalText
@@ -5086,7 +5100,7 @@ DisplayStringInStatusLineWithEscToGoBack:
         jsr     ClearStatusLine
         lda     #65
         sta     Columns80::OURCH
-        lda     #<TD693         ; "Esc to go back"
+        lda     #<TD693 ; "Esc to go back"
         ldx     #>TD693
         jsr     DisplayMSB1String
 FinishDisplayStringInStatusLine:
@@ -5109,12 +5123,12 @@ ClearStatusLine:
         rts
 
 DisplayHitEscToEditDocInStatusLine:
-        lda     #<TD70C         ; "Hit ESC to edit document"
+        lda     #<TD70C ; "Hit ESC to edit document"
         ldx     #>TD70C
         jmp     DisplayStringInStatusLine
 
 WaitForSpaceToContinueInStatusLine:
-        lda     #<TD726         ; "Press <space> to continue"
+        lda     #<TD726 ; "Press <space> to continue"
         ldx     #>TD726
         jsr     DisplayStringInStatusLine
 WaitForSpaceKeypress:
@@ -5213,7 +5227,7 @@ PlayToneCounter:
 PerformBlockSelection:
         jsr     SaveCurrentLineState2
         stz     CurrentCursorXPos
-        lda     #<TD93A         ; "Use up/down to highlight block..."
+        lda     #<TD93A ; "Use up/down to highlight block..."
         ldx     #>TD93A
         jsr     DisplayStringInStatusLineWithEscToGoBack
         jsr     SwapCursorMovementControlChars
@@ -5340,12 +5354,12 @@ DrawCurrentDocumentLineInInverse:
 
 ShowPrintDialog:
         jsr     DrawDialogBox
-        .byte   10
-        .byte   42
-        .byte   5
-        .byte   18
-        .byte   34
-        .addr   TDAD0           ; "Print File"
+        .byte   10 ; height
+        .byte   42 ; width
+        .byte   5  ; y-coord
+        .byte   18 ; x-coord
+        .byte   34 ; x-coord of title
+        .addr   TDAD0 ; "Print File"
         ldx     #38
         ldy     #12
         jsr     DrawAbortButton
@@ -5353,7 +5367,7 @@ ShowPrintDialog:
 LF2D7:  ldy     #7
         ldx     #20
         jsr     SetCursorPosToXY
-        lda     #<TDADD         ; "Printer Slot?"
+        lda     #<TDADD ; "Printer Slot?"
         ldx     #>TDADD
         jsr     DisplayMSB1String
         lda     PrinterSlot
@@ -5369,7 +5383,7 @@ LF2FA:  sta     PrinterSlot
         ldy     #8
         ldx     #20
         jsr     SetCursorPosToXY
-        lda     #<TDAF1         ; "Printer init string:"
+        lda     #<TDAF1 ; "Printer init string:"
         ldx     #>TDAF1
         jsr     DisplayMSB1String
         ldy     PrinterInitString
@@ -5394,7 +5408,7 @@ LF32F:  lda     ProDOS::SysPathBuf,x
         bne     LF33E
         inx
         lda     ProDOS::SysPathBuf,x
-        and     #ToControlCharANDMask
+        and     #UppercaseToControlCharANDMask
 LF33E:  sta     PrinterInitStringRawBytes,y
         cpx     ProDOS::SysPathBuf
         bge     LF34A
@@ -5408,7 +5422,7 @@ LF351:  sty     PrinterInitStringRawBytes
         ldy     #9
         ldx     #20
         jsr     SetCursorPosToXY
-        lda     #<TDB46         ; "Enter left margin..."
+        lda     #<TDB46 ; "Enter left margin..."
         ldx     #>TDB46
         jsr     DisplayMSB1String
         lda     PrinterLeftMargin
@@ -5418,10 +5432,10 @@ LF351:  sty     PrinterInitStringRawBytes
         ldy     #10
         ldx     #20
         jsr     SetCursorPosToXY
-        lda     #<TDB06         ; "Print from start/cursor..."
+        lda     #<TDB06 ; "Print from start/cursor..."
         ldx     #>TDB06
         jsr     DisplayMSB1String
-LF37B:  jsr     GetKeypress           ; input routine
+LF37B:  jsr     GetKeypress ; input routine
         jsr     CharToUppercase
         cmp     #HICHAR(ControlChar::Esc)
         beq     LF31E
@@ -5459,9 +5473,9 @@ LF397:  jsr     OutputCharAndAdvanceScreenPos
         ldy     #12
         lda     (Pointer),y
         and     #%11110000
-        cmp     #$30            ; Serial/Parallel card?
+        cmp     #$30 ; Serial/Parallel card?
         beq     FoundPrinter
-        cmp     #$10            ; Printer?
+        cmp     #$10 ; Printer?
         beq     FoundPrinter
 LF3CF:  ldy     #1
         lda     (Pointer),y
@@ -5683,7 +5697,7 @@ FormatAXInDecimal:
         sta     ScratchVal4
         stx     ScratchVal5
         sty     StringFormattingBuffer
-LF570:  jsr     LF591
+LF570:  jsr     ConvertNextDecimalDigit
         lda     ScratchVal6
         ora     #%10110000
         sta     StringFormattingBuffer,y
@@ -5699,8 +5713,8 @@ LF58A:  sta     StringFormattingBuffer,y
         bne     LF58A
 LF590:  rts
 
-;;; convert digit to decimal?
-LF591:  ldx     #$10
+ConvertNextDecimalDigit:
+        ldx     #$10
         lda     #0
         sta     ScratchVal6
 LF598:  jsr     LF5B0
@@ -5778,6 +5792,8 @@ IsOnLastDocumentLine:
         cmp     DocumentLineCount+1
 @Out:   rts
 
+;;; Returns the current line length in A,
+;;; and Carry clear if cursor is at (or past) end of line.
 IsCursorAtEndOfLine:
         jsr     GetLengthOfCurrentLine
         and     #%01111111
@@ -5792,7 +5808,7 @@ CheckIfMemoryFull:
         lda     DocumentLineCount+1
         cmp     #>MaxLineCount
         bne     @Out
-        lda     #<TDA94         ; "Memory full..."
+        lda     #<TDA94 ; "Memory full..."
         ldx     #>TDA94
         jsr     DisplayStringInStatusLine
         jsr     BeepAndWaitForReturnOrEscKey
@@ -5970,7 +5986,8 @@ LoadFirstLinePointer:
 ;;; Pads line with spaces if line length is less than
 ;;; current cursor x-position. Updates line length,
 ;;; preserving MSB.
-LF74B:  jsr     GetLengthOfCurrentLine
+PadLineWithSpacesUpToCursor:
+        jsr     GetLengthOfCurrentLine
         and     #%01111111 ; clear MSB
         tay
         lda     #' '
@@ -5989,7 +6006,8 @@ LF769:  jsr     SetLengthOfCurrentLine
         rts
 
 ;;; If on the last line of the doc, set its length to 0.
-;;; Otherwise insert a new line.
+;;; Otherwise insert a new line. The newly inserted line
+;;; will be at Pointer4.
 InsertNewLine:
         jsr     LoadCurrentLinePointerIntoPointer4
         jsr     IsOnLastDocumentLine
@@ -6020,23 +6038,26 @@ DecrementDocumentLineCount:
         dec     DocumentLineCount+1
 @Out:   rts
 
-;;; Unknown routine
-LF7A2:  jsr     GetLengthOfCurrentLine
-        bpl     LF7B1
+;;; Splits a line at the cursor. Y should also be set
+;;; to the current cursor position within the line prior
+;;; to calling.
+SplitLineAtCursor:
+        jsr     GetLengthOfCurrentLine
+        bpl     LF7B1 ; branch if no CR at end of line
         lda     #$80
-        jsr     SetLengthOfLineAtPointer4
+        jsr     SetLengthOfLineAtPointer4 ; empty line with CR
         jsr     GetLengthOfCurrentLine
         and     #%01111111
-LF7B1:  sta     ScratchVal4
+LF7B1:  sta     ScratchVal4 ; saved line length
         sec
-        sbc     CurrentCursorXPos
+        sbc     CurrentCursorXPos ; decrement it by length before cursor
         sta     ScratchVal4
-        beq     LF7E8
-        tya
-        ora     #%10000000
+        beq     LF7E8           ; if 0, current line will be an empty line with CR
+        tya                     ; new length of current line is length before cursor
+        ora     #%10000000 ; add CR
         jsr     SetLengthOfCurrentLine
         ldx     #1
-LF7C5:  iny
+LF7C5:  iny     ; then copy text after cursor to other line
         jsr     GetCharAtYInCurrentLine
         phy
         phx
@@ -6052,7 +6073,7 @@ LF7C5:  iny
         jsr     GetLengthOfLineAtPointer4
         bpl     LF7E3
         txa
-        ora     #%10000000
+        ora     #%10000000 ; add back CR
         bra     LF7E4
 LF7E3:  txa
 LF7E4:  jsr     SetLengthOfLineAtPointer4
@@ -6070,21 +6091,22 @@ LoadCurrentLinePointerIntoPointer4:
         stx     Pointer4+1
         rts
 
+;;; The newly inserted line will be at Pointer4.
 ShiftLinePointersDownForInsert:
         jsr     SaveCurrentLineState2
         inc     SavedCurrentLineNumber2
-        bne     LF80A
+        bne     @Skip
         inc     SavedCurrentLineNumber2+1
-LF80A:  ldx     DocumentLineCount+1
+@Skip:  ldx     DocumentLineCount+1
         lda     DocumentLineCount
         sta     CurrentLineNumber
         stx     CurrentLineNumber+1
         jsr     LoadLineAXPointerIntoAX
         pha
         phx
-        bra     LF820
-LF81D:  jsr     LoadPreviousLinePointer
-LF820:  jsr     LoadCurrentLinePointerIntoAX
+        bra     @First
+@Loop:  jsr     LoadPreviousLinePointer
+@First: jsr     LoadCurrentLinePointerIntoAX
         ldy     #2
         sta     (Pointer),y
         iny
@@ -6092,10 +6114,10 @@ LF820:  jsr     LoadCurrentLinePointerIntoAX
         sta     (Pointer),y
         lda     CurrentLineNumber
         cmp     SavedCurrentLineNumber2
-        bne     LF81D
+        bne     @Loop
         lda     CurrentLineNumber+1
         cmp     SavedCurrentLineNumber2+1
-        bne     LF81D
+        bne     @Loop
         ldy     #1
         pla
         sta     (Pointer),y
@@ -6108,9 +6130,9 @@ LF820:  jsr     LoadCurrentLinePointerIntoAX
 
 ShiftLinePointersUpForDelete:
         jsr     IsOnLastDocumentLine
-        beq     LF887
+        beq     @Out
         jsr     SaveCurrentLineState
-LF855:  jsr     LoadCurrentLinePointerIntoAX
+@Loop:  jsr     LoadCurrentLinePointerIntoAX
         ldy     #3
         lda     (Pointer),y
         ldy     #1
@@ -6120,7 +6142,7 @@ LF855:  jsr     LoadCurrentLinePointerIntoAX
         sta     (Pointer)
         jsr     IncrementCurrentLineNumber
         jsr     IsOnLastDocumentLine
-        bne     LF855
+        bne     @Loop
         ldy     #3
         lda     SavedCurLinePtr+1
         sta     (Pointer),y
@@ -6132,10 +6154,12 @@ LF855:  jsr     LoadCurrentLinePointerIntoAX
         sta     CurLinePtr
         stx     CurLinePtr+1
         jsr     LoadCurrentLinePointerIntoPointer4
-LF887:  rts
+@Out:   rts
 
-;;; Unknown routine
-LF888:  jsr     SaveCurrentLineState2
+;;; Word-wraps (reflows) the text up to the next CR
+;;; (the end of the text line).
+WordWrapUpToNextCR:
+        jsr     SaveCurrentLineState2
         stz     ScratchVal11
 LF88E:  jsr     IsOnLastDocumentLine
         bne     LF896
@@ -6218,14 +6242,15 @@ LF94D:  jsr     RestoreCurrentLineState2
         lda     ScratchVal11
         rts
 
-;;; unknown routine
-;;; returns in A length of current line - length of previous line
-;;; or 0 if there is no previous line (I think)
-LF954:  jsr     IsOnFirstDocumentLine
+;;; Returns the amount of space left on the previous line,
+;;; if there is a previous line AND that line doesn't end
+;;; with a CR; otherwise returns 0.
+GetSpaceLeftOnPreviousLine:
+        jsr     IsOnFirstDocumentLine
         beq     LF974
         jsr     LoadPreviousLinePointer
         jsr     GetLengthOfCurrentLine
-        bmi     LF971
+        bmi     LF971 ; branch if ends in CR
         sta     ScratchVal2
         lda     DocumentLineLength
         sec
@@ -6285,14 +6310,14 @@ LF9B6:  cpy     LastEditableColumn
 LF9CA:  lda     CurrentCursorXPos
         pha
         sty     CurrentCursorXPos
-        jsr     LF7A2
+        jsr     SplitLineAtCursor
         pla
         sta     CurrentCursorXPos
         jsr     GetLengthOfCurrentLine
 LF9DB:  and     #%01111111
         jsr     SetLengthOfCurrentLine
         jsr     LoadNextLinePointer
-        jsr     LF888
+        jsr     WordWrapUpToNextCR
         jsr     LoadPreviousLinePointer
         rts
 
@@ -7085,7 +7110,8 @@ PathnameBuffer: ; ($BDE7)
         .byte   $00             ; length byte
         repeatbyte $00, ProDOS::MaxPathnameLength
 
-Pathname2Buffer: ; $(BE28)
+;;; Path to the Macros file.
+MacrosFilePathnameBuffer:
         .byte   $00             ; length byte
         repeatbyte $00, ProDOS::MaxPathnameLength
 
@@ -7721,7 +7747,7 @@ TDF19:  msb1pstring "File Locked"
 EditMacro:
         sta     MacroNumberBeingEdited
         jsr     DisplayCurrentMacroText
-        lda     #<TDB85         ; Macro editing instructions
+        lda     #<TDB85 ; Macro editing instructions
         ldx     #>TDB85
         jsr     DisplayStringInStatusLine
 L030F:  jsr     DisplayCurrentMacroText
