@@ -43,19 +43,24 @@ StringPtr            := $EE
 
 ;;; also used: $E0 (written, but never read)
 
-DataBuffer         := $B800        ; 1K I/O buffer up to $BC00
-BlockBuffer:       := $1000        ; 512-byte buffer for reading a disk block
-BackingStoreBuffer := $0800        ; Buffer in aux-mem to store text behind menus
+DataBuffer         := $B800 ; 1K I/O buffer up to $BC00, used for ON_LINE, clipboard, etc.
+DataBufferLength:  :=  $400
+BlockBuffer:       := $1000 ; 512-byte buffer for reading a disk block
+BackingStoreBuffer := $0800 ; Buffer in aux-mem to store text behind menus
 
+LineLength:    := 80
 TopMenuLine    :=  2
+MaxMenuLine    :=  8
 TopTextLine    :=  3
 BottomTextLine := 21
 StatusLine     := 23
 LastColumn     := 79
+ColumCount:    := 80
+
+LastClipboardPointer := DataBuffer+DataBufferLength-LineLength
 
 VisibleLineCount      := BottomTextLine-TopTextLine+1
 MaxLineCount          := $0458
-LastLinePointer       := $BBB0
 MaxMacroLength        := 70
 NumLinesOnPrintedPage := 54
 StartingMousePos      := 128
@@ -63,7 +68,7 @@ StartingMousePos      := 128
 ;;; mask for converting lowercase char to uppercase
 ToUpperCaseANDMask := %11011111
 ;;; mask for converting digit char to digit value
-CharToDigitANDMask := %00011111
+CharToDigitANDMask := %00001111
 ;;; mask for converting digit value to (high ascii) digit char
 DigitToCharORMask := %10110000
 ;;; mask for converting uppercase char to control char
@@ -655,7 +660,6 @@ L24EB:  sty     SoftSwitch::SETSTDZP
         sta     CallInitMouse+1
 
 LinePointerTable           := $0800
-
 LineCountForMainMem        := $0213 ; (531 lines)
 LineCountForAuxMem         := $0245 ; (581 lines)
 FirstLinePointerForMainMem := $1200
@@ -745,7 +749,7 @@ GenerateLinePointerTable:
         inc     Pointer+1
 L25E2:  lda     LinePointer
         clc
-        adc     #80            ; LinePointer += 80
+        adc     #ColumnCount ; LinePointer += 80
         sta     LinePointer
         bcc     L25F0
         inc     LinePointer+1
@@ -1294,7 +1298,7 @@ ToggleShowCR:
 ClearToEndOfCurrentLine:
         jsr     IsCursorAtEndOfLine
         bcc     LD2C6 ; nothing to do
-        stz     DocumentChangedFlag
+        stz     DocumentUnchangedFlag
         jsr     GetLengthOfCurrentLine
         and     #%10000000 ; preserve CR bit
         ora     CurrentCursorXPos
@@ -1322,7 +1326,7 @@ LD2C6:  jmp     MainEditorInputLoop
 CarriageReturn:
         jsr     CheckIfMemoryFull
         beq     LD2C6 ; can't insert a new line
-        stz     DocumentChangedFlag
+        stz     DocumentUnchangedFlag
         jsr     InsertNewLine
         jsr     IsCursorAtEndOfLine
         bcc     LD2E1 ; branch if yes
@@ -1343,7 +1347,7 @@ LD2F9:  jsr     WordWrapUpToNextCR
 
 ;;; Process ordinary, non-command keypresses.
 ProcessOrdinaryInputChar:
-        stz     DocumentChangedFlag
+        stz     DocumentUnchangedFlag
         and     #%01111111
         pha
         jsr     IsCursorAtEndOfLine
@@ -1482,7 +1486,7 @@ LD435:  pla
         jmp     MainEditorInputLoop
 
 DeleteChar:
-        stz     DocumentChangedFlag
+        stz     DocumentUnchangedFlag
         lda     CurrentCursorXPos
         beq     LD4B1
 LD441:  jsr     IsCursorAtEndOfLine
@@ -1606,33 +1610,35 @@ ClearCurrentLine:
         jmp     ClearToEndOfCurrentLine
 LD55C:  jsr     DecrementDocumentLineCount
         jsr     MoveToPreviousDocumentLine
-LD562:  stz     DocumentChangedFlag
+LD562:  stz     DocumentUnchangedFlag
         jmp     MainEditorRedrawDocument
 LD568:  jsr     ShiftLinePointersUpForDelete
         jsr     DecrementDocumentLineCount
         bra     LD562
 
 BlockDelete:
-        lda     CurrentCursorXPos
+        lda     CurrentCursorXPos ; save current cursor position
         pha
         lda     CurrentCursorYPos
         pha
-        jsr     PerformBlockSelection
-        bcc     LD588
-        pla
+        jsr     PerformBlockSelection ; select block
+        bcc     LD588 ; branch if block selection cancelled
+        pla     ; restore cursor position
         sta     CurrentCursorYPos
         pla
         sta     CurrentCursorXPos
-        jmp     MainEditor
-LD588:  lda     CurLinePtr
-        cmp     SavedCurLinePtr2
+        jmp     MainEditor ; return to editing
+LD588:  lda     CurLinePtr ; compare ending line pointer
+        cmp     SavedCurLinePtr2 ; to starting selection line pointer
         bne     LD5AF
         lda     CurLinePtr+1
         cmp     SavedCurLinePtr2+1
         bne     LD5AF
+;;; starting and ending line number of selection are the same, so
+;;; just delete the current line
         jsr     DisplayDefaultStatusText
         jsr     DisplayHelpKeyCombo
-        pla
+        pla     ; restore original cursor position
         sta     CurrentCursorYPos
         tay
         pla
@@ -1640,83 +1646,92 @@ LD588:  lda     CurLinePtr
         tax
         jsr     SetCursorPosToXY
         jsr     DisplayLineAndColLabels
-        jmp     ClearCurrentLine
-LD5AF:  stz     DocumentChangedFlag
+        jmp     ClearCurrentLine ; clear current line, and done
+;;; deleting multiple lines
+LD5AF:  stz     DocumentUnchangedFlag
         lda     #<TD964 ; "Please Wait.."
         ldx     #>TD964
         jsr     DisplayStringInStatusLine
         lda     CurrentLineNumber+1
         cmp     SavedCurrentLineNumber2+1
-        blt     LD5E3
+        blt     LD5E3 ; branch for backward selection
         beq     LD5DB
 LD5C3:  lda     CurrentLineNumber
+;;; save the number of lines to be deleted in ScratchVal4 (low) and
+;;; ScratchVal6 (high).
         sec
-        sbc     SavedCurrentLineNumber2
+        sbc     SavedCurrentLineNumber2 ; SV(4,6) = ending - starting
         sta     ScratchVal4
         lda     CurrentLineNumber+1
         sbc     SavedCurrentLineNumber2+1
         sta     ScratchVal6
         jsr     RestoreCurrentLineState2
-        bra     LD5F6
+        bra     DeleteLinesLoop
 LD5DB:  lda     CurrentLineNumber
         cmp     SavedCurrentLineNumber2
         bge     LD5C3
-LD5E3:  lda     SavedCurrentLineNumber2
+LD5E3:  lda     SavedCurrentLineNumber2 ; SV(4,6) = starting - ending
         sec
         sbc     CurrentLineNumber
         sta     ScratchVal4
         lda     SavedCurrentLineNumber2+1
         sbc     CurrentLineNumber+1
         sta     ScratchVal6
-LD5F6:  jsr     ShiftLinePointersUpForDelete
-        jsr     DecrementDocumentLineCount
-        dec     ScratchVal4
+DeleteLinesLoop:
+        jsr     ShiftLinePointersUpForDelete ; delete line
+        jsr     DecrementDocumentLineCount   ; decrement line count
+        dec     ScratchVal4 ; decrement count of lines left to delete
         lda     ScratchVal4
         cmp     #$FF
-        bne     LD5F6
+        bne     DeleteLinesLoop
         dec     ScratchVal6
         lda     ScratchVal6
         cmp     #$FF
-        bne     LD5F6
-        pla
+        bne     DeleteLinesLoop
+        pla     ; restore original cursor position
         sta     CurrentCursorYPos
         pla
         sta     CurrentCursorXPos
         lda     DocumentLineCount+1
         cmp     CurrentLineNumber+1
-        bge     LD62A
+        bge     LD62A ; branch if didn't delete to end of doc
 LD620:  jsr     IsOnFirstDocumentLine
-        beq     LD632
+        beq     LD632 ; branch if deleted to start of doc
         jsr     LoadPreviousLinePointer
         bra     LD632
-LD62A:  lda     DocumentLineCount
+LD62A:  lda     DocumentLineCount ; check if entire doc was deleted
         cmp     CurrentLineNumber
         blt     LD620
 LD632:  lda     DocumentLineCount
         ora     DocumentLineCount+1
         bne     LD645
-        jsr     LoadFirstLinePointer
+        jsr     LoadFirstLinePointer ; clear the document
         jsr     SetDocumentLineCountToCurrentLine
         lda     #0
         jsr     SetLengthOfCurrentLine
+;;; Check if deletion resulted in the cursor being past the
+;;; current line; if so, move it to the current line.
 LD645:  lda     CurrentLineNumber+1
         bne     LD667
         lda     CurrentLineNumber
-        cmp     #20
+        cmp     #BottomTextLine-1
         bge     LD667
         lda     CurrentCursorYPos
         sec
-        sbc     #2
+        sbc     #TopTextLine-1
         cmp     CurrentLineNumber
-        blt     LD667
+        blt     LD667 ; if cursor y pos <= current line, OK
         beq     LD667
-        lda     CurrentLineNumber
+        lda     CurrentLineNumber ; else move cursor to current line
         clc
-        adc     #2
+        adc     #TopTextLine-1
         sta     CurrentCursorYPos
 LD667:  jmp     MainEditor
 
-;;;  Copy text to/from clipboard
+;;; Copy text to/from clipboard. Clipboard is stored in DataBuffer ($B800),
+;;; which is 1K in size. The first byte of the buffer is the number of
+;;; lines stored in the clipboard; the next two bytes are FF,FF if the
+;;; clipboard is not empty.
 CopyToOrFromClipboard:
         lda     #<TD5D0 ; "Copy to or from..."
         ldx     #>TD5D0
@@ -1726,30 +1741,34 @@ LD671:  jsr     GetKeypress
         cmp     #HICHAR(ControlChar::Esc)
         beq     LD6A4
         cmp     #HICHAR('T')
-        beq     LD6E1
+        beq     CopyToClipboard
         cmp     #HICHAR('F')
-        beq     LD687
+        beq     CopyFromClipboard
         jsr     PlayTone
         bra     LD671
-LD687:  lda     DataBuffer
-        beq     LD69A
+CopyFromClipboard:
+        lda     DataBuffer
+        beq     ClipboardEmpty
         lda     DataBuffer+1
         cmp     #$FF
-        bne     LD69A
+        bne     ClipboardEmpty
         lda     DataBuffer+2
         cmp     #$FF
-        beq     LD6A7
-LD69A:  lda     #<TD5F8 ; "Clipboard is empty"
+        beq     ClipboardNotEmpty
+ClipboardEmpty:
+        lda     #<TD5F8 ; "Clipboard is empty"
         ldx     #>TD5F8
         jsr     DisplayStringInStatusLineWithEscToGoBack
         jsr     BeepAndWaitForReturnOrEscKey
 LD6A4:  jmp     MainEditor
-LD6A7:  jsr     DisplayPleaseWaitForClipboard
+ClipboardNotEmpty:
+        jsr     DisplayPleaseWaitForClipboard
         jsr     SaveCurrentLineState
         lda     DataBuffer
-        sta     LD77D
+        sta     ClipboardLineCounter ; save line count
+CopyLineFromClipboard:
 LD6B3:  jsr     CheckIfMemoryFull
-        beq     LD6DB
+        beq     LD6DB ; memory full; can't copy
         jsr     InsertNewLine
         jsr     LoadNextLinePointer
         lda     (Pointer5)
@@ -1761,25 +1780,27 @@ LD6C3:  lda     (Pointer5),y
         bpl     LD6C3
         and     #%01111111
         sec
-        adc     Pointer5
-        sta     Pointer5
+        adc     Pointer5 ; increment Pointer5 by the length of
+        sta     Pointer5 ; the line just copied
         bcc     LD6D6
         inc     Pointer5+1
-LD6D6:  dec     LD77D
-        bne     LD6B3
+LD6D6:  dec     ClipboardLineCounter ; Decrement # of lines left to copy
+        bne     CopyLineFromClipboard
 LD6DB:  jsr     RestoreCurrentLineState
         jmp     MainEditor
-LD6E1:  lda     CurrentCursorXPos
+CopyToClipboard:
+        lda     CurrentCursorXPos ; save current cursor position
         pha
         lda     CurrentCursorYPos
         pha
-        jsr     PerformBlockSelection
-        bcc     LD6F9
-LD6EE:  pla
+        jsr     PerformBlockSelection ; select text to copy
+        bcc     LD6F9 ; branch if selection accepted
+FinishClipboardCopy:
+        pla     ; restore cursor position
         sta     CurrentCursorYPos
         pla
         sta     CurrentCursorXPos
-        jmp     MainEditor
+        jmp     MainEditor ; return to editing
 LD6F9:  jsr     DisplayPleaseWaitForClipboard
         lda     CurrentLineNumber+1
         cmp     SavedCurrentLineNumber2+1
@@ -1791,16 +1812,18 @@ LD6F9:  jsr     DisplayPleaseWaitForClipboard
 LD70E:  jsr     SaveCurrentLineState
         jsr     RestoreCurrentLineState2
         bra     LD721
+;;; handle backward selection
 LD716:  ldy     #3
 LD718:  lda     SavedCurLinePtr2,y
         sta     SavedCurLinePtr,y
         dey
         bpl     LD718
-LD721:  stz     DataBuffer
-        lda     #$FF
+LD721:  stz     DataBuffer ; init line count in clipboard
+        lda     #$FF ; mark clipboard as not empty
         sta     DataBuffer+1
         sta     DataBuffer+2
-LD72C:  jsr     GetLengthOfCurrentLine
+CopyLineToClipboard:
+        jsr     GetLengthOfCurrentLine
         and     #%01111111
         tay
 LD732:  jsr     GetCharAtYInCurrentLine
@@ -1809,18 +1832,18 @@ LD732:  jsr     GetCharAtYInCurrentLine
         bpl     LD732
         and     #%01111111
         sec
-        adc     Pointer5
-        sta     Pointer5
+        adc     Pointer5 ; advance Pointer 5 by length
+        sta     Pointer5 ; of line just copied
         bcc     LD745
 LD743:  inc     Pointer5+1
-LD745:  inc     DataBuffer
-        lda     Pointer5+1
-        cmp     #>LastLinePointer
+LD745:  inc     DataBuffer ; increment line count in clipboard
+        lda     Pointer5+1 ; check if clipboard full
+        cmp     #>LastClipboardPointer
         blt     LD754
         lda     Pointer5
-        cmp     #<LastLinePointer
-        bge     LD771
-LD754:  lda     CurrentLineNumber+1
+        cmp     #<LastClipboardPointer
+        bge     ClipboardFull
+LD754:  lda     CurrentLineNumber+1 ; check if more left to copy
         cmp     SavedCurrentLineNumber+1
         blt     LD766
         bne     LD76B
@@ -1828,15 +1851,17 @@ LD754:  lda     CurrentLineNumber+1
         cmp     SavedCurrentLineNumber
         bge     LD76B
 LD766:  jsr     LoadNextLinePointer
-        bra     LD72C
+        bra     CopyLineToClipboard
 LD76B:  jsr     RestoreCurrentLineState2
-        jmp     LD6EE
-LD771:  lda     #<TD60C ; "Clipboard is full"
+        jmp     FinishClipboardCopy
+ClipboardFull:
+        lda     #<TD60C ; "Clipboard is full"
         ldx     #>TD60C
         jsr     DisplayStringInStatusLineWithEscToGoBack
         jsr     BeepAndWaitForReturnOrEscKey
         bra     LD76B
-LD77D:  .byte   $00
+ClipboardLineCounter:
+        .byte   $00
 
 ;;; display "please wait" and load Pointer5 with beginning
 ;;; of clipboard data
@@ -1862,7 +1887,7 @@ EditTabStops:
 LD79F:  ldy     #22
         ldx     #0
         jsr     SetCursorPosToXY
-        ldy     #80
+        ldy     #ColumnCount
         jsr     OutputDashedLine
         ldy     #22
         ldx     #0
@@ -2247,7 +2272,7 @@ LDA68:  ldx     #41
         lda     #HICHAR('S')
         jsr     OutputCharAndAdvanceScreenPos
         pla
-        ora     #%10110000
+        ora     #DigitToCharORMask
         jsr     OutputCharAndAdvanceScreenPos
         lda     #HICHAR(',')
         jsr     OutputCharAndAdvanceScreenPos
@@ -2333,7 +2358,7 @@ LDB0D:  jsr     PlayTone
         jsr     GetLengthOfCurrentLine
         and     #%01111111
         beq     @Exit
-LDB36:  lda     DocumentChangedFlag
+LDB36:  lda     DocumentUnchangedFlag
         bne     @Exit
         lda     PathnameBuffer
         beq     LDB46
@@ -2699,14 +2724,14 @@ LDE41:  stz     LineLengthLowDigit
         blt     LDE39 ; high digit must be in range 3-7
         cmp     #HICHAR('8')
         bge     LDE39
-        and     #%00001111 ; convert char to numeric value 0-9
+        and     #CharToDigitANDMask ; convert char to numeric value 0-9
         sta     LineLengthHighDigit
         lda     ProDOS::SysPathBuf+2
         cmp     #HICHAR('0') ; check for valid low digit
         blt     LDE39
         cmp     #HICHAR(':')
         bge     LDE39
-        and     #%00001111 ; convert char to numeric value 0-9
+        and     #CharToDigitANDMask ; convert char to numeric value 0-9
         sta     LineLengthLowDigit
         ldy     LineLengthHighDigit
         beq     LDE79
@@ -2716,7 +2741,7 @@ LDE73:  clc     ; add (10 * high digit) to low digit
         bne     LDE73
 LDE79:  cmp     #39 ; minimum width is 39
         blt     LDE39
-        cmp     #80 ; maximum width is 79
+        cmp     #LastEditableColumn+1 ; maximum width is 79
         bge     LDE39
         sta     DocumentLineLength
         dec     a
@@ -2756,7 +2781,7 @@ LDEBC:  and     #ToUpperCaseANDMask
         bra     LDEB1
 LDECB:  jsr     SaveMacrosToFile
 LDECE:  jmp     CleanUpAfterMenuSelection
-LDED1:  and     #%00001111 ; to digit
+LDED1:  and     #CharToDigitANDMask
         jsr     EditMacro
         bra     LDEA4
 
@@ -3202,7 +3227,7 @@ ShowOpenFileDialog:
         jsr     GetLengthOfCurrentLine
         and     #%01111111
 LE2A0:  beq     LE2A7
-LE2A2:  lda     DocumentChangedFlag
+LE2A2:  lda     DocumentUnchangedFlag
         beq     LE2AA ; branch if document has unsaved changes
 LE2A7:  jmp     LE30C ; skip offering to save current document
 LE2AA:  jsr     DrawDialogBox
@@ -3393,7 +3418,7 @@ LE43D:  cmp     #ProDOS::EEOF
         bne     ErrorLoadingFile
 ;;; done loading file (or memory full)
 DoneReadingFile:
-        sta     DocumentChangedFlag
+        sta     DocumentUnchangedFlag
         jsr     CloseFile
         jsr     MoveCursorToHomePos
         jsr     SetDocumentLineCountToCurrentLine
@@ -3428,7 +3453,7 @@ CloseFileAndDisplayError:
         jmp     DisplayErrorAndReturnWithCarrySet
 
 EnterNewPrefix:
-        ldy     PrefixBuffer
+        ldy     PrefixBuffer ; copy current prefix to SysPathBuf
 LE48E:  lda     PrefixBuffer,y
         ora     #%10000000
         sta     ProDOS::SysPathBuf-1,y
@@ -3449,25 +3474,25 @@ LE48E:  lda     PrefixBuffer,y
         ldy     #15
         ldx     #11
         lda     #63
-        jsr     EditPath
+        jsr     EditPath ; input new prefix
         bcs     LE4F7
         ldy     ProDOS::SysPathBuf
 LE4C3:  iny
         sty     ProDOS::SysPathBuf-1
-        lda     #HICHAR('/')
+        lda     #HICHAR('/') ; prepend a slash
         sta     ProDOS::SysPathBuf
         lda     #ProDOS::CSETPREFIX
         ldy     #>EditorSetPrefixParams
         ldx     #<EditorSetPrefixParams
-        jsr     MakeMLICall
+        jsr     MakeMLICall ; set the new prefix
         beq     LE4DA
         jmp     DisplayErrorAndReturnWithCarrySet
-LE4DA:  ldy     ProDOS::SysPathBuf-1
+LE4DA:  ldy     ProDOS::SysPathBuf-1 ; copy it back to PrefixBuffer
 LE4DD:  lda     ProDOS::SysPathBuf-1,y
         sta     PrefixBuffer,y
         dey
         bpl     LE4DD
-        lda     #HICHAR('/')
+        lda     #HICHAR('/') ; append a slash
         ldx     PrefixBuffer
         cmp     PrefixBuffer,x
         beq     LE4F7
@@ -3502,13 +3527,13 @@ LE525:  ldy     #12
         jsr     EditPath
         bcc     LE544
         and     #ToUpperCaseANDMask
-        cmp     #ControlChar::Return
+        cmp     #HICHAR(ControlChar::Return)
         beq     LE541
-        cmp     #'N'
+        cmp     #HICHAR('N')
         bne     LE53F
         jsr     EnterNewPrefix
         bra     ShowSaveAsDialog
-LE53F:  sec
+LE53F:  sec     ; dialog cancelled
         rts
 LE541:  ldy     #$FF
         .byte   OpCode::BIT_Abs
@@ -3520,7 +3545,7 @@ LE544:  ldy     #0
         jsr     ClearStatusLine
         jsr     GetFileInfo
         beq     LE55F
-        cmp     #$46
+        cmp     #ProDOS::EFILENOTF ; file doesn't exist
         beq     LE590
         jmp     DisplayErrorAndReturnWithCarrySet
 LE55F:  lda     EditorGetFileInfoFileType
@@ -3539,7 +3564,7 @@ LE56F:  ldy     #StatusLine
         jsr     GetConfirmationKeypress
         bcs     LE53F
         jsr     ClearStatusLine
-LE588:  jsr     DeleteFile
+LE588:  jsr     DeleteFile  ; delete old version of file
         beq     LE590
         jmp     DisplayErrorAndReturnWithCarrySet
 LE590:  ldy     ProDOS::SysPathBuf
@@ -3547,12 +3572,12 @@ LE593:  lda     ProDOS::SysPathBuf,y
         sta     PathnameBuffer,y
         dey
         bpl     LE593
-        lda     #ProDOS::CCREATE
+        lda     #ProDOS::CCREATE ; create new version of file
         ldy     #>EditorCreateParams
         ldx     #<EditorCreateParams
         jsr     MakeMLICall
         bne     DisplayErrorAndReturnWithCarrySet
-        jsr     OpenFile
+        jsr     OpenFile ; open the file
         bne     LE60D
         jsr     SaveCurrentLineState2
         jsr     LoadFirstLinePointer
@@ -3565,20 +3590,20 @@ LE5B5:  jsr     CopyCurrentLineToSysPathBuf
         lda     ProDOS::SysPathBuf
         and     #%01111111
 LE5C7:  sta     EditorReadWriteRequestCount
-        beq     LE5D7
-        lda     #ProDOS::CWRITE
+        beq     LE5D7 ; branch if empty line
+        lda     #ProDOS::CWRITE ; write current line to file
         ldx     #<EditorReadWriteParams
         ldy     #>EditorReadWriteParams
         jsr     MakeMLICall
         bne     LE60D
-LE5D7:  lda     #>SingleReturnCharBuffer
+LE5D7:  lda     #>SingleReturnCharBuffer ; write blank line to file
         cmp     EditorReadWriteBufferAddr+1
         beq     LE5F6
         lda     SaveCRAtEndOfEachLineFlag
         bne     LE5E8
         lda     ProDOS::SysPathBuf
         bpl     LE5F6
-LE5E8:  lda     #<SingleReturnCharBuffer            ; write a single CR char to file
+LE5E8:  lda     #<SingleReturnCharBuffer ; write a single CR char to file
         sta     EditorReadWriteBufferAddr
         lda     #>SingleReturnCharBuffer
         sta     EditorReadWriteBufferAddr+1
@@ -3587,11 +3612,11 @@ LE5E8:  lda     #<SingleReturnCharBuffer            ; write a single CR char to 
 LE5F6:  jsr     IsOnLastDocumentLine
         beq     LE600
         jsr     LoadNextLinePointer
-        bra     LE5B5
-LE600:  jsr     CloseFile
+        bra     LE5B5 ; branch to write the next line
+LE600:  jsr     CloseFile ; close file
         jsr     RestoreCurrentLineState2
         lda     #1
-        sta     DocumentChangedFlag
+        sta     DocumentUnchangedFlag
         clc
         rts
 LE60D:  pha
@@ -3850,11 +3875,15 @@ LE7C9:  tya
         jsr     GetKeypress
         rts
 
+;;; Document line buffers are used to store the formatted
+;;; directory entries. Directory entries are displayed in
+;;; a scrollable list that occupies 8 screen rows from row
+;;; 13 to 20.
 ShowDirectoryListingDialog:
         lda     #HICHAR(ControlChar::Return)
         sta     CursorMovementControlChars+4
         lda     #$FF
-        sta     DocumentChangedFlag
+        sta     DocumentUnchangedFlag
         jsr     DrawDialogBox
         .byte   12 ; height
         .byte   44 ; width
@@ -3876,13 +3905,13 @@ ShowDirectoryListingDialog:
         lda     #<TD84B ; "Use up/down to select..."
         ldx     #>TD84B
         jsr     DisplayStringInStatusLine
-        ldy     PrefixBuffer
+        ldy     PrefixBuffer    ; copy PrefixBuffer to SysPathBuf
 LE81F:  lda     PrefixBuffer,y
         sta     ProDOS::SysPathBuf,y
         dey
         bpl     LE81F
         jsr     OpenDirectoryAndReadHeader
-        bcs     LE88B
+        bcs     LE88B ; branch on error
         jsr     LoadFirstLinePointer
         lda     FileCountInDirectory
         sta     DirectoryEntriesLeftToList
@@ -3894,9 +3923,9 @@ LE842:  lda     DirectoryEntriesLeftToList+1
         ora     DirectoryEntriesLeftToList
         beq     LE890
         jsr     ReadNextDirectoryEntry
-        bcs     LE886
+        bcs     LE886 ; branch on error
         jsr     FormatDirectoryEntryToString
-        lda     MemoryMap::INBUF
+        lda     MemoryMap::INBUF ; copy formatted entry to doc line
         tay
         jsr     SetLengthOfCurrentLine
 LE859:  lda     MemoryMap::INBUF,y
@@ -3910,6 +3939,7 @@ LE859:  lda     MemoryMap::INBUF,y
         dec     DirectoryEntriesLeftToList+1
 LE86F:  jsr     LoadNextLinePointer
         bra     LE842
+;;; clean up & return
 LE874:  jsr     LoadFirstLinePointer
         jsr     SetDocumentLineCountToCurrentLine
         lda     #$80
@@ -3931,23 +3961,25 @@ LE890:  jsr     CloseFile
         jsr     DisplayStringInStatusLine
         jsr     PlayTone
         jsr     GetKeypress
+;;; dismiss the dialog
 LE8A8:  bra     LE874
-LE8AA:  lda     #$0C
-        sta     LE99C
+LE8AA:  lda     #12  ; highlight top entry
+        sta     DirectoryListHighlightedRow
         jsr     LoadFirstLinePointer
-LE8B2:  jsr     SaveCurrentLineState2
+RedrawDirectoryListingScrollArea:
+        jsr     SaveCurrentLineState2
         ldy     #12
 LE8B7:  ldx     #19
         jsr     SetCursorPosToXY
         lda     ZeroPage::CV
-        cmp     LE99C
+        cmp     DirectoryListHighlightedRow
         bne     LE8C6
         jsr     SetMaskForInverseText
 LE8C6:  ldx     CurLinePtr+1
         lda     CurLinePtr
-        lsr     a
-        php
-        rol     a
+        lsr     a ; check low bit of pointer
+        php       ; to determine memory bank
+        rol     a ; containing that line
         plp
         bcc     LE8D3
         sta     SoftSwitch::RDCARDRAM
@@ -3965,7 +3997,8 @@ LE8D3:  jsr     DisplayString
 LE8EE:  ldy     #StatusLine
         ldx     #32
         jsr     SetCursorPosToXY
-LE8F5:  jsr     GetKeypress
+DirectoryListingGetKeypress:
+        jsr     GetKeypress
         cmp     #HICHAR(ControlChar::UpArrow)
         beq     LE93B
         cmp     #HICHAR(ControlChar::Return)
@@ -3973,49 +4006,52 @@ LE8F5:  jsr     GetKeypress
         cmp     #HICHAR(ControlChar::Esc)
         beq     LE8A8
         cmp     #HICHAR(ControlChar::DownArrow)
-        bne     LE8F5
+        bne     DirectoryListingGetKeypress
+;;; move highlight to next directory entry
         lda     DocumentLineCount+1
         bne     LE91C
         lda     DocumentLineCount
         cmp     #9
-        bge     LE91C
+        bge     LE91C ; branch if there are more entries past bottom
         clc
-        adc     #$0A
-        cmp     LE99C
-        blt     LE8F5
-LE91C:  lda     LE99C
-        cmp     #$14
-        blt     LE931
+        adc     #10
+        cmp     DirectoryListHighlightedRow ; already on last entry
+        blt     DirectoryListingGetKeypress
+LE91C:  lda     DirectoryListHighlightedRow
+        cmp     #20
+        blt     LE931 ; branch if not on bottom visible entry
         jsr     IsOnLastDocumentLine
-        beq     LE8F5
+        beq     DirectoryListingGetKeypress
         jsr     RestoreCurrentLineState2
-        jsr     LoadNextLinePointer
-        jmp     LE8B2
+        jsr     LoadNextLinePointer ; scroll up one line
+        jmp     RedrawDirectoryListingScrollArea
 LE931:  inc     a
-        sta     LE99C
+        sta     DirectoryListHighlightedRow
         jsr     RestoreCurrentLineState2
-        jmp     LE8B2
+        jmp     RedrawDirectoryListingScrollArea
+;;; move highlight to previous directory entry
 LE93B:  jsr     SaveCurrentLineState
         jsr     RestoreCurrentLineState2
         jsr     IsOnFirstDocumentLine
         bne     LE952
-        lda     LE99C
-        cmp     #$0C
+        lda     DirectoryListHighlightedRow
+        cmp     #12 ; aleady on top visible entry?
         bne     LE95F
         jsr     RestoreCurrentLineState
-        bra     LE8F5
-LE952:  lda     LE99C
-        cmp     #$0D
-        bge     LE95F
+        bra     DirectoryListingGetKeypress
+LE952:  lda     DirectoryListHighlightedRow
+        cmp     #13
+        bge     LE95F ; branch if not on top visible entry
         jsr     LoadPreviousLinePointer
-        jmp     LE8B2
-LE95F:  dec     a
-        sta     LE99C
-        jmp     LE8B2
+        jmp     RedrawDirectoryListingScrollArea
+LE95F:  dec     a ; scroll down one line
+        sta     DirectoryListHighlightedRow
+        jmp     RedrawDirectoryListingScrollArea
+;;; accept selected file
 LE966:  jsr     RestoreCurrentLineState2
-        lda     LE99C
-        sec
-        sbc     #$0C
+        lda     DirectoryListHighlightedRow
+        sec     ; compute index of selected entry
+        sbc     #12
         clc
         adc     CurrentLineNumber
         sta     CurrentLineNumber
@@ -4028,16 +4064,17 @@ LE97B:  jsr     LoadCurrentLinePointerIntoAX
         ldx     #0
 LE986:  inx
         iny
-        jsr     GetCharAtYInCurrentLine
-        sta     ProDOS::SysPathBuf,x
+        jsr     GetCharAtYInCurrentLine ; copy filename of selected entry
+        sta     ProDOS::SysPathBuf,x    ; to SysPathBuf
         cmp     #HICHAR(' ')
         bne     LE986
         dex
         stx     ProDOS::SysPathBuf
         stx     PathnameLength
         jmp     LE874
-LE99C:  .byte   $00             ; scratch byte
-DirectoryEntriesLeftToList0:
+DirectoryListHighlightedRow:
+        .byte   $00
+DirectoryEntriesLeftToList:
         .word   $0000
 
 OpenDirectoryAndReadHeader:
@@ -4140,7 +4177,7 @@ LEA3A:  lda     #HICHAR('$')
         lsr     a
         lsr     a
         lsr     a
-        ora     #%10110000
+        ora     #DigitToCharORMask
         cmp     #HICHAR(':')
         blt     LEA4F
         clc
@@ -4148,7 +4185,7 @@ LEA3A:  lda     #HICHAR('$')
 LEA4F:  sta     MemoryMap::INBUF+$13
         lda     ProDOS::SysPathBuf+$10
         and     #%00001111
-        ora     #%10110000
+        ora     #DigitToCharORMask
         cmp     #HICHAR(':')
         blt     LEA60
         clc
@@ -4246,22 +4283,22 @@ GetConfirmationKeypress:
 @Out:   rts
 
 OutputCharAndAdvanceScreenPos:
-        pha                     ; save registers
+        pha     ; save registers
         phy
         phx
-        cmp     #$20            ; MouseText?
-        bge     LEB14           ; branch if no
+        cmp     #$20 ; MouseText?
+        bge     LEB14 ; branch if no
         clc
-        adc     #$40            ; remap MouseText
+        adc     #$40 ; remap MouseText
 LEAFD:  jsr     WriteCharToScreen
         lda     Columns80::OURCH
         inc     a
-        cmp     #80             ; last column?
+        cmp     #ColumnCount ; last column?
         blt     LEB0D
 LEB08:  jsr     MoveTextOutputPosToStartOfNextLine
         lda     #0
 LEB0D:  sta     Columns80::OURCH
-LEB10:  plx                     ; restore registers
+LEB10:  plx     ; restore registers
         ply
         pla
         rts
@@ -4271,12 +4308,12 @@ LEB14:  cmp     #HICHAR(' ')
         bge     LEB2E
 LEB1C:  and     CharANDMask
         bmi     LEAFD
-        cmp     #$40            ; check if MouseText char
-        blt     LEAFD           ; ($40 - $5F)
+        cmp     #$40 ; check if MouseText char
+        blt     LEAFD ; ($40 - $5F)
         cmp     #$60
         bge     LEAFD
         sec
-        sbc     #$40            ; subtract $40 if MouseText
+        sbc     #$40 ; subtract $40 if MouseText
         bra     LEAFD
 LEB2E:  cmp     #HICHAR(ControlChar::Return)
         beq     LEB08
@@ -4285,18 +4322,19 @@ LEB2E:  cmp     #HICHAR(ControlChar::Return)
         cmp     #HICHAR(ControlChar::NormalVideo)
         beq     LEB3F
         bra     LEB10
-LEB3C:  lda     #%01111111      ; turn on inverse video
+LEB3C:  lda     #%01111111 ; turn on inverse video
         .byte   OpCode::BIT_Abs
-LEB3F:  lda     #%11111111      ; turn on normal video
+LEB3F:  lda     #%11111111 ; turn on normal video
         sta     CharANDMask
 LEB44:  bra     LEB10
-LEB46:  lda     ZeroPage::CV
-LEB48:  bra     ComputeTextOutputPos
+
+ComputeTextOutputPosForCurrentCursorPos:
+        lda     ZeroPage::CV
+        bra     ComputeTextOutputPos
 MoveTextOutputPosToStartOfNextLine:
         stz     Columns80::OURCH
         lda     ZeroPage::CV
         inc     a
-
 ;;;  for row in A
 ComputeTextOutputPos:
         sta     ZeroPage::CV
@@ -4425,7 +4463,7 @@ LEC40:  lda     (ZeroPage::BAS),y
         dey
         bpl     LEC40
         bra     LEC2C
-        bra     LEC10
+        bra     LEC10 ; unreachable instruction
 
 OutputDiamond:
         lda     #MT_REMAP(MouseText::Diamond)
@@ -4469,25 +4507,27 @@ OutputRowOfChars:
 ;;; will be clear.
 GetKeypress:
         lda     MacroRemainingLength
-        beq     LEC90
+        beq     ReadKeyboardAndMouse
+;;; Replay next keypress from macro
         lda     (MacroPtr)
         pha
         inc     MacroPtr
         bne     LEC89
         inc     MacroPtr+1
 LEC89:  dec     MacroRemainingLength
-        ldx     #0
+        ldx     #0 ; no KeyModReg when replaying macro
         pla
         rts
 ;;; Keyboard & mouse input, blinking cursor
 ;;; Returns KeyModReg in X
-LEC90:  jsr     LEB46 ; TODO: define label
+ReadKeyboardAndMouse:
+        jsr     ComputeTextOutputPosForCurrentCursorPos
         jsr     ReadCharFromScreen
         sta     CharUnderCursor
         lda     CurrentCursorChar
-        sta     LFBA5
+        sta     DisplayedCharAtCursor
         lda     MouseSlot
-        beq     LECCF
+        beq     ToggleCharAtCursor ; branch if no mouse
         sei
         jsr     LoadXYForMouseCall
         jsr     CallInitMouse
@@ -4512,20 +4552,23 @@ LEC90:  jsr     LEB46 ; TODO: define label
         sei
         jsr     CallPosMouse
         cli
-LECCF:  jsr     DisplayCurrentDateAndTimeInMenuBar
+;;; Toggle displayed character between cursor character
+;;; and what's under cursor
+ToggleCharAtCursor:
+        jsr     DisplayCurrentDateAndTimeInMenuBar
         jsr     ReadCharFromScreen
         pha
-        lda     LFBA5
+        lda     DisplayedCharAtCursor
         jsr     WriteCharToScreen
         pla
-        sta     LFBA5
+        sta     DisplayedCharAtCursor
         lda     CursorBlinkRate
         sta     CursorBlinkCounter
 LECE6:  lda     #$28
         sta     CursorBlinkCounter+1
 LECEB:  ldy     #0
-LECED:  lda     SoftSwitch::STORE80OFF
-        bmi     LED5F
+LECED:  lda     SoftSwitch::KBD
+        bmi     HandleKeyPress ; branch if key pressed
         dey
         bne     LECED
         lda     MouseSlot
@@ -4536,7 +4579,7 @@ LECED:  lda     SoftSwitch::STORE80OFF
         ldx     MouseSlot
         ldy     #4
         lda     Mouse::MOUSTAT,x
-        bpl     LED23
+        bpl     LED23 ; branch if mouse button up
 LED09:  cli
         jsr     LoadXYForMouseCall
         sei
@@ -4544,50 +4587,51 @@ LED09:  cli
         ldx     MouseSlot
         ldy     #4
         lda     Mouse::MOUSTAT,x
-        bmi     LED09
+        bmi     LED09 ; loop while mouse button down
         lda     #$80
         jsr     CallWaitMonitorRoutine
-        ldy     #4
+        ldy     #4 ; mouse button released; maps to control char
         bra     LED5B
 LED23:  dey
         lda     Mouse::MOUXL,x
         cmp     MousePosMin
-        blt     LED5B           ; movement left maps to left arrow
+        blt     LED5B ; movement left maps to left arrow
         dey
         cmp     MousePosMax
-        bge     LED5B           ; movement right maps to right arrow
+        bge     LED5B ; movement right maps to right arrow
         dey
         lda     Mouse::MOUYL,x
         cmp     MousePosMin
-        blt     LED5B           ; movement up maps to up arrow
+        blt     LED5B ; movement up maps to up arrow
         dey
         cmp     MousePosMax
-        bge     LED5B           ; movement down maps to down arrow
+        bge     LED5B ; movement down maps to down arrow
         cli
         bra     LED4E
 LED44:  ldy     #$4B            ; 75
-LED46:  lda     SoftSwitch::KBD
-        bmi     LED5F
+LED46:  lda     SoftSwitch::KBD ; check for keypress
+        bmi     HandleKeyPress
         dey
         bne     LED46
-LED4E:  dec     CursorBlinkCounter+1
+LED4E:  dec     CursorBlinkCounter+1 ; decrement blink counter
         bne     LECEB
         dec     CursorBlinkCounter
         bne     LECE6
-        jmp     LECCF
+        jmp     ToggleCharAtCursor
 LED5B:  cli
         lda     CursorMovementControlChars,y
-LED5F:  bit     SoftSwitch::RDBTN0
-        bmi     LED71
-        bit     SoftSwitch::RDBTN1
-        bpl     LED73
-        cmp     #HICHAR('1')
+HandleKeyPress:
+        bit     SoftSwitch::RDBTN0 ; Open-Apple
+        bmi     LED71              ; branch if down
+        bit     SoftSwitch::RDBTN1 ; Solid-Apple
+        bpl     LED73              ; branch if up
+        cmp     #HICHAR('1')       ; keypress between 1 and 9?
         blt     LED71
         cmp     #HICHAR(':')
-        bge     HandleMacroFunctionKey
-LED71:  and     #%01111111      ; clear MSB
+        blt     HandleMacroFunctionKey
+LED71:  and     #%01111111 ; clear MSB
 LED73:  pha
-        lda     CharUnderCursor
+        lda     CharUnderCursor ; hide cursor
         jsr     WriteCharToScreen
 LoadKeyModReg:
         ldx     SoftSwitch::KEYMODREG
@@ -4597,12 +4641,12 @@ LoadKeyModReg:
         ldy     #8
         pla
 LED85:  cmp     MacroFunctionKeys,y
-        beq     LEDA0
+        beq     TriggerMacroNumberY
         dey
         bpl     LED85
         pha
 LED8E:  stz     SoftSwitch::KBDSTRB
-        pla
+        pla     ; restore key typed into A
         rts
 
 ;;; Function keys F1-F9 (on Extended Keyboard II) are used to invoke
@@ -4619,10 +4663,11 @@ MacroFunctionKeys:
         .byte   ControlChar::F9
 
 HandleMacroFunctionKey:
-        and     #%00001111
+        and     #CharToDigitANDMask
         dec     a
         tay
-LEDA0:  jsr     LoadMacroPointer
+TriggerMacroNumberY:
+        jsr     LoadMacroPointer
         lda     (MacroPtr)
         sta     MacroRemainingLength
         beq     LEDBC
@@ -4794,7 +4839,7 @@ ConvertToBase10:
         inx
         bcs     ConvertToBase10
         adc     #10
-        ora     #%10110000
+        ora     #DigitToCharORMask
         rts
 
 DrawCurrentDocumentLine:
@@ -4945,7 +4990,7 @@ OutputStatusBarLine:
         ldx     #0
         ldy     #22
         jsr     SetCursorPosToXY
-        ldy     #80
+        ldy     #ColumnCount
         jsr     OutputHorizontalLine
         rts
 
@@ -5146,66 +5191,70 @@ CharToUppercase:
         and     #ToUpperCaseANDMask
 @Out:   rts
 
-;;; This appears to be restoring the text screen (rows 2-9,
-;;; under the menus) from $800 in aux mem
+;;; Restore the text screen (rows 2-9, under the menus)
+;;; from the backing store buffer.
 RestoreScreenAreaUnderMenus:
         lda     #<BackingStoreBuffer
         sta     Pointer6
         lda     #>BackingStoreBuffer
         sta     Pointer6+1
-        lda     #2
-LF139:  jsr     ComputeTextOutputPos
+        lda     #TopMenuLine
+@LineLoop:
+        jsr     ComputeTextOutputPos
         lda     #LastColumn
         sta     Columns80::OURCH
-LF141:  ldy     Columns80::OURCH
+@CharLoop:
+        ldy     Columns80::OURCH
         sta     SoftSwitch::RDCARDRAM
         lda     (Pointer6),y
         sta     SoftSwitch::RDMAINRAM
         jsr     WriteCharToScreen
         dec     Columns80::OURCH
-        bpl     LF141
+        bpl     @CharLoop
         lda     Pointer6
         clc
-        adc     #80
+        adc     #ColumnCount
         sta     Pointer6
-        bcc     LF15F
+        bcc     @Skip
         inc     Pointer6+1
-LF15F:  lda     ZeroPage::CV
-        cmp     #9
-        bge     LF168
+@Skip:  lda     ZeroPage::CV
+        cmp     #MaxMenuLine+1
+        bge     @Out
         inc     a
-        bra     LF139
-LF168:  rts
+        bra     @LineLoop
+@Out:   rts
 
-;;; This appears to be storing text rows 2-9 (which are obscured by
-;;; menus) to $800 in aux mem
+;;; Store text rows 2-9 (which are obscured by menus)
+;;; to the backing store buffer.
 SaveScreenAreaUnderMenus:
         lda     #<BackingStoreBuffer
         sta     Pointer6
         lda     #>BackingStoreBuffer
         sta     Pointer6+1
-        lda     #2
-LF173:  jsr     ComputeTextOutputPos
+        lda     #TopMenuLine
+@LineLoop:
+        jsr     ComputeTextOutputPos
         lda     #LastColumn
         sta     Columns80::OURCH
-LF17B:  jsr     ReadCharFromScreen
+@CharLoop:
+        jsr     ReadCharFromScreen
         ldy     Columns80::OURCH
         sta     SoftSwitch::WRCARDRAM
         sta     (Pointer6),y
         sta     SoftSwitch::WRMAINRAM
         dec     Columns80::OURCH
-        bpl     LF17B
+        bpl     @CharLoop
         lda     Pointer6
         clc
-        adc     #80
+        adc     #ColumnCount
         sta     Pointer6
-        bcc     LF199
+        bcc     @Skip
         inc     Pointer6+1
-LF199:  lda     ZeroPage::CV
-        cmp     #9
+@Skip:  lda     ZeroPage::CV
+        cmp     #MaxMenuLine+1
         bge     @Out
         inc     a
-        bra     LF173
+        bra     @LineLoop
 @Out:   rts
 
 ;;; Standard ProDOS tone
@@ -5604,7 +5653,7 @@ RestoreCSW:
         sta     ZeroPage::CSWL
         lda     SavedCSW+1
         sta     ZeroPage::CSWH
-        lda     #80
+        lda     #ColumnCount
         sta     ZeroPage::WNDWDTH
         rts
 
@@ -5699,7 +5748,7 @@ FormatAXInDecimal:
         sty     StringFormattingBuffer
 LF570:  jsr     ConvertNextDecimalDigit
         lda     ScratchVal6
-        ora     #%10110000
+        ora     #DigitToCharORMask
         sta     StringFormattingBuffer,y
         dey
         lda     ScratchVal4
@@ -6634,9 +6683,9 @@ CursorBlinkCounter:
         .addr   $0000
 CursorBlinkRate:
         .byte   $05
-
-        .byte   $00             ; unused?
-
+; This value toggles between CurrentCursorChar and CharUnderCursor.
+DisplayedCharAtCursor:
+        .byte   $00
 CurrentCursorChar:
         .byte   HICHAR('_')     ; current cursor
 CharUnderCursor:
@@ -6655,7 +6704,7 @@ CurrentDocumentPathnameLength:
         .byte   $00             ; copy of $BDA5 ? (prefix length byte)
 ScratchVal1:
         .byte   $00             ; scratch byte; used for various purposes
-DocumentChangedFlag:            ; set to 0 if the document has changed since last save
+DocumentUnchangedFlag:          ; set to 0 if the document has changed since last save
         .byte   $FF
 ScratchVal2:
         .byte   $00             ; scratch byte; used for various purposes
@@ -7076,8 +7125,8 @@ EditorReadWriteRequestCount:
         .word   $0000 ; request_count
         .word   $0000 ; transfer_count
 
-;;;  just a lonely carriage return? is this a dummy buffer?
-;;;  it's address is written to EditorReadWriteBufferAddr in one place
+;;; One-byte buffer containing only a carriage return. Used to write
+;;; empty lines, or CR after each line, when saving file.
 SingleReturnCharBuffer:
         .byte   ControlChar::Return
 
@@ -7196,9 +7245,9 @@ ShowCRFlag: ; whether carriage returns are shown (using mousetext)
         .byte   $00
 
 SavedCurLinePtr2:
-        .addr   $0000           ; another place to save CurLinePtr
+        .addr   $0000 ; stores ending line for block delete/copy
 SavedCurrentLineNumber2:
-        .word   $0000           ; another place to save CurrentLineNumber
+        .word   $0000 ; another place to save CurrentLineNumber
 
 SavedCurLinePtr:
         .addr   $0000
