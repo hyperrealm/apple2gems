@@ -1,11 +1,18 @@
 
-disasm:
-	da65 --info info.txt EDIT#ff2000
+include ../../build/rules.mak
 
-disasm2:
-	da65 --info info2.txt EDIT_MAIN
+EXT := \#ff2000
 
-listing: EdIt.s
-	enscript $< -2r -G -E -C -H3 -M Letter -o $*.list.ps
-	ps2pdf $*.list.ps
-	rm -f $*.list.ps
+all : EDIT$(EXT)
+
+LDFLAGS := -C ./apple.cfg
+
+
+EDIT$(EXT): EdIt.o
+	ld65 $(LDFLAGS) -o $@ $<
+	diff ../obj/EDIT#ff2000 $@
+
+listing: EdIt.list.pdf
+
+clean:
+	rm -f *.o *.list *$(INIT_EXT) *$(SYS_EXT) *.list.pdf

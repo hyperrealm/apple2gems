@@ -9,8 +9,8 @@ SysPathBuf      := $0280
 ;;; Zero page locations
 
 DiskDriverCommandNum := $42
-DiskDriverUnitNum := $43
-DiskDriverBufferPtr := $44 ; 2 bytes
+DiskDriverUnitNum    := $43
+DiskDriverBufferPtr  := $44 ; 2 bytes
 
 
 MaxPathnameLength := $40
@@ -247,7 +247,7 @@ ENODEVCONN      := $28 ; No device connected
 EWRITEPROT      := $2B ; Disk write-protected
 EBADBLOCK       := $2D ; Bad block on disk
 EDISKSW         := $2E ; Disk switched
-NODISK          := $2F ; No disk in drive
+ENODISK         := $2F ; No disk in drive
 EBADPATH        := $40 ; Invalid pathname
 EMAXFILES       := $42 ; Maximum number of files open
 EBADREFNUM      := $43 ; Invalid reference number

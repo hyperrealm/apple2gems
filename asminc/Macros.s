@@ -30,3 +30,4 @@
         .repeat l
         .byte c
         .endrepeat
+.endmacro
