@@ -25,7 +25,7 @@
 
 Pointer              := $06 ; used for most text editing operations
 MacroPtr             := $08
-CurLinePtr           := $0A
+CurrentLinePtr       := $0A
 Pointer4             := $0C ; used for insert/delete and word-wrap
 ParamTablePtr        := $1A
 MouseSlot            := $E1
@@ -882,7 +882,7 @@ RemoveRamDiskPrompt:
         highasciiz "OK to remove files on /"
         .byte   HICHAR(ControlChar::Return)
 
-        highasciiz "Loading EDIT.CONFIG.."
+        highasciiz "Loading EDIT.CONFIG.." ; not referenced
 
 MouseSignatureByteOffsets:
         .byte   $05,$07,$0B,$0C,$FB,$11
@@ -899,9 +899,7 @@ TicConfigFilename:
 TicEditorFilename:
         .asciiz "TIC.EDITOR"
 
-;;; 64-byte buffer (unused?)
-L2A4D:
-        repeatbyte $00, 64
+        repeatbyte $00, 64 ; unused 64-byte buffer
 
 GetSetPrefixParams:
         .byte   $01
@@ -1482,8 +1480,10 @@ LD401:  jsr     CheckIfMemoryFull
         sta     CurrentCursorXPos
         jsr     MoveToNextDocumentLine
         jmp     LD3CD
-        jsr     PlayTone        ;unreachable instruction
-LD435:  pla
+
+        jsr     PlayTone ; unreachable instruction
+
+LD435:  pla     ; should this label have been on previous instruction?
         jmp     MainEditorInputLoop
 
 DeleteChar:
@@ -1629,11 +1629,11 @@ BlockDelete:
         pla
         sta     CurrentCursorXPos
         jmp     MainEditor ; return to editing
-LD588:  lda     CurLinePtr ; compare ending line pointer
-        cmp     SavedCurLinePtr2 ; to starting selection line pointer
+LD588:  lda     CurrentLinePtr ; compare ending line pointer
+        cmp     SavedCurrentLinePtr2 ; to starting selection line pointer
         bne     LD5AF
-        lda     CurLinePtr+1
-        cmp     SavedCurLinePtr2+1
+        lda     CurrentLinePtr+1
+        cmp     SavedCurrentLinePtr2+1
         bne     LD5AF
 ;;; starting and ending line number of selection are the same, so
 ;;; just delete the current line
@@ -1815,8 +1815,8 @@ LD70E:  jsr     SaveCurrentLineState
         bra     LD721
 ;;; handle backward selection
 LD716:  ldy     #3
-LD718:  lda     SavedCurLinePtr2,y
-        sta     SavedCurLinePtr,y
+LD718:  lda     SavedCurrentLinePtr2,y
+        sta     SavedCurrentLinePtr,y
         dey
         bpl     LD718
 LD721:  stz     DataBuffer ; init line count in clipboard
@@ -2168,7 +2168,7 @@ MenuNavigationKeypressHandlerTable:
 
 ;;; Removes a menu after a menu selection triggered the display of
 ;;; a dialog box (in which case the menu is still on-screen)
-CleanUpAfterMenuSelection: ; $D9D6
+CleanUpAfterMenuSelection:
         jsr     RestoreScreenAreaUnderMenus
         jsr     DrawMenuBarAndMenuTitles
         lda     #HICHAR(ControlChar::Esc)
@@ -3445,6 +3445,7 @@ ErrorLoadingFile:
         jsr     SetDocumentLineCountToCurrentLine
         jsr     MoveCursorToHomePos
         bra     CloseFileAndDisplayError
+
         lda     #ProDOS::EBADSTYPE ; unreachable instruction
 
 CloseFileAndDisplayError:
@@ -3906,7 +3907,7 @@ ShowDirectoryListingDialog:
         lda     #<TD84B ; "Use up/down to select..."
         ldx     #>TD84B
         jsr     DisplayStringInStatusLine
-        ldy     PrefixBuffer    ; copy PrefixBuffer to SysPathBuf
+        ldy     PrefixBuffer ; copy PrefixBuffer to SysPathBuf
 LE81F:  lda     PrefixBuffer,y
         sta     ProDOS::SysPathBuf,y
         dey
@@ -3976,8 +3977,8 @@ LE8B7:  ldx     #19
         cmp     DirectoryListHighlightedRow
         bne     LE8C6
         jsr     SetMaskForInverseText
-LE8C6:  ldx     CurLinePtr+1
-        lda     CurLinePtr
+LE8C6:  ldx     CurrentLinePtr+1
+        lda     CurrentLinePtr
         lsr     a ; check low bit of pointer
         php       ; to determine memory bank
         rol     a ; containing that line
@@ -4059,8 +4060,8 @@ LE966:  jsr     RestoreCurrentLineState2
         bcc     LE97B
         inc     CurrentLineNumber+1
 LE97B:  jsr     LoadCurrentLinePointerIntoAX
-        sta     CurLinePtr
-        stx     CurLinePtr+1
+        sta     CurrentLinePtr
+        stx     CurrentLinePtr+1
         ldy     #0
         ldx     #0
 LE986:  inx
@@ -4087,7 +4088,7 @@ OpenDirectoryAndReadHeader:
         sta     EditorReadWriteBufferAddr+1
 ;;; Directory entries are 39 bytes in length but there are two 2-byte
 ;;; pointers at the beginning of the block, hence the 43.
-        lda     #$2B            ; 43
+        lda     #43
         sta     EditorReadWriteRequestCount
         stz     EditorReadWriteRequestCount+1
         jsr     ReadFromDirectoryBlock
@@ -4227,7 +4228,7 @@ LEAA5:  lda     DateTimeFormatString,y
         dey
         bne     LEAA5
 ;;; store final length of output
-        lda     #$2A ; 42
+        lda     #42
         sta     MemoryMap::INBUF
         rts
 
@@ -4464,6 +4465,7 @@ LEC40:  lda     (ZeroPage::BAS),y
         dey
         bpl     LEC40
         bra     LEC2C
+
         bra     LEC10 ; unreachable instruction
 
 OutputDiamond:
@@ -4487,16 +4489,16 @@ OutputHorizontalLineX:
         lda     #MT_REMAP(MouseText::HorizLine)
         .byte   OpCode::BIT_Abs
 OutputDashedLine:
-        lda     #HICHAR('-')    ; dash
+        lda     #HICHAR('-')
         .byte   OpCode::BIT_Abs
 OutputOverscoreLine:
         lda     #MT_REMAP(MouseText::Overscore)
         .byte   OpCode::BIT_Abs
 OutputUnderscoreLine:
-        lda     #HICHAR('_')    ; underscore
+        lda     #HICHAR('_')
         .byte   OpCode::BIT_Abs
 OutputSpaces:
-        lda     #HICHAR(' ')    ; space
+        lda     #HICHAR(' ')
 OutputRowOfChars:
         jsr     OutputCharAndAdvanceScreenPos
         dey
@@ -4745,7 +4747,7 @@ DisplayCurrentDateAndTimeInMenuBar:
         jsr     FormatCurrentTime
         lda     ProDOS::MACHID
         lsr     a
-        bcc     @Out           ; branch if no clock/cal card
+        bcc     @Out ; branch if no clock/cal card
         lda     ZeroPage::CV
         pha
         lda     Columns80::OURCH
@@ -4845,8 +4847,8 @@ ConvertToBase10:
 
 DrawCurrentDocumentLine:
         stz     Columns80::OURCH
-        ldx     CurLinePtr+1
-        lda     CurLinePtr
+        ldx     CurrentLinePtr+1
+        lda     CurrentLinePtr
         lsr     a
         php
         rol     a
@@ -5789,10 +5791,10 @@ MoveCursorToHomePos:
         rts
 
 SaveCurrentLineState2:
-        lda     CurLinePtr
-        sta     SavedCurLinePtr2
-        lda     CurLinePtr+1
-        sta     SavedCurLinePtr2+1
+        lda     CurrentLinePtr
+        sta     SavedCurrentLinePtr2
+        lda     CurrentLinePtr+1
+        sta     SavedCurrentLinePtr2+1
         lda     CurrentLineNumber
         sta     SavedCurrentLineNumber2
         lda     CurrentLineNumber+1
@@ -5804,17 +5806,17 @@ RestoreCurrentLineState2:
         sta     CurrentLineNumber+1
         lda     SavedCurrentLineNumber2
         sta     CurrentLineNumber
-        lda     SavedCurLinePtr2+1
-        sta     CurLinePtr+1
-        lda     SavedCurLinePtr2
-        sta     CurLinePtr
+        lda     SavedCurrentLinePtr2+1
+        sta     CurrentLinePtr+1
+        lda     SavedCurrentLinePtr2
+        sta     CurrentLinePtr
         rts
 
 SaveCurrentLineState:
-        lda     CurLinePtr
-        sta     SavedCurLinePtr
-        lda     CurLinePtr+1
-        sta     SavedCurLinePtr+1
+        lda     CurrentLinePtr
+        sta     SavedCurrentLinePtr
+        lda     CurrentLinePtr+1
+        sta     SavedCurrentLinePtr+1
         lda     CurrentLineNumber
         sta     SavedCurrentLineNumber
         lda     CurrentLineNumber+1
@@ -5826,10 +5828,10 @@ RestoreCurrentLineState:
         sta     CurrentLineNumber+1
         lda     SavedCurrentLineNumber
         sta     CurrentLineNumber
-        lda     SavedCurLinePtr+1
-        sta     CurLinePtr+1
-        lda     SavedCurLinePtr
-        sta     CurLinePtr
+        lda     SavedCurrentLinePtr+1
+        sta     CurrentLinePtr+1
+        lda     SavedCurrentLinePtr
+        sta     CurrentLinePtr
         rts
 
 ;;; Returns with Zero flag set if on last line of doc.
@@ -5868,21 +5870,21 @@ CheckIfMemoryFull:
         sta     PathnameBuffer
 @Out:   rts
 
-IsOnFirstDocumentLine: ;; F65B
+IsOnFirstDocumentLine:
         lda     CurrentLineNumber
         cmp     #1
         bne     @Out
         lda     CurrentLineNumber+1
 @Out:   rts
 
-LoadPreviousLinePointer:        ;f666
+LoadPreviousLinePointer:
         jsr     DecrementCurrentLineNumber
         jsr     LoadCurrentLinePointerIntoAX
-        sta     CurLinePtr
-        stx     CurLinePtr+1
+        sta     CurrentLinePtr
+        stx     CurrentLinePtr+1
         rts
 
-DecrementCurrentLineNumber:;; f671
+DecrementCurrentLineNumber:
         dec     CurrentLineNumber
         lda     CurrentLineNumber
         cmp     #$FF
@@ -5890,7 +5892,7 @@ DecrementCurrentLineNumber:;; f671
         dec     CurrentLineNumber+1
 @Out:   rts
 
-LoadCurrentLinePointerIntoAX:        ;; f67f
+LoadCurrentLinePointerIntoAX:
 ;;; decrements by 1 to get pointer offset;
 ;;; this is because line numbers start at 1
         lda     CurrentLineNumber
@@ -5926,8 +5928,8 @@ LoadLineAXPointerIntoAX:
 LoadNextLinePointer:
         jsr     IncrementCurrentLineNumber
         jsr     LoadCurrentLinePointerIntoAX
-        sta     CurLinePtr
-        stx     CurLinePtr+1
+        sta     CurrentLinePtr
+        stx     CurrentLinePtr+1
         rts
 
 IncrementCurrentLineNumber:
@@ -5936,7 +5938,7 @@ IncrementCurrentLineNumber:
         inc     CurrentLineNumber+1
 @Out:   rts
 
-;;; never referenced? $F6BD
+;;; This routine is never referenced
         ldx     CurrentLineNumber+1
         lda     CurrentLineNumber
         clc
@@ -6021,15 +6023,15 @@ SkipNonSpacesForward:
         bne     SkipNonSpacesForward
 @Out:   rts
 
-;;; set current line to 1 and load it into CurLinePtr.
+;;; set current line to 1 and load it into CurrentLinePtr.
 LoadFirstLinePointer:
         stz     CurrentLineNumber+1
         lda     #1
         sta     CurrentLineNumber
         ldx     CurrentLineNumber+1
         jsr     LoadLineAXPointerIntoAX_1
-        sta     CurLinePtr
-        stx     CurLinePtr+1
+        sta     CurrentLinePtr
+        stx     CurrentLinePtr+1
         rts
 
 ;;; Pads line with spaces if line length is less than
@@ -6197,15 +6199,15 @@ ShiftLinePointersUpForDelete:
         jsr     IsOnLastDocumentLine
         bne     @Loop
         ldy     #3
-        lda     SavedCurLinePtr+1
+        lda     SavedCurrentLinePtr+1
         sta     (Pointer),y
         dey
-        lda     SavedCurLinePtr
+        lda     SavedCurrentLinePtr
         sta     (Pointer),y
         jsr     RestoreCurrentLineState
         jsr     LoadCurrentLinePointerIntoAX
-        sta     CurLinePtr
-        stx     CurLinePtr+1
+        sta     CurrentLinePtr
+        stx     CurrentLinePtr+1
         jsr     LoadNextLinePointerIntoPointer4
 @Out:   rts
 
@@ -6380,17 +6382,17 @@ GetLengthOfCurrentLine:
         bra     LF9F4
 GetCharAtYInCurrentLine:
         sty     YRegisterStorage
-LF9F4:  lda     CurLinePtr
+LF9F4:  lda     CurrentLinePtr
         lsr     a
         bcc     LFA07
         sta     SoftSwitch::RDCARDRAM
-        lda     (CurLinePtr),y
+        lda     (CurrentLinePtr),y
         sta     SoftSwitch::RDMAINRAM
 LFA01:  pha
         ldy     YRegisterStorage
         pla
         rts
-LFA07:  lda     (CurLinePtr),y
+LFA07:  lda     (CurrentLinePtr),y
         bra     LFA01
 
 GetLengthOfLineAtPointer4:
@@ -6421,17 +6423,17 @@ SetLengthOfCurrentLine:
 SetCharAtYInCurrentLine:
         sty     YRegisterStorage
 LFA36:  pha
-        lda     CurLinePtr
+        lda     CurrentLinePtr
         lsr     a
         bcc     LFA49
         sta     SoftSwitch::WRCARDRAM
         pla
-        sta     (CurLinePtr),y
+        sta     (CurrentLinePtr),y
         sta     SoftSwitch::WRMAINRAM
         ldy     YRegisterStorage
         rts
 LFA49:  pla
-        sta     (CurLinePtr),y
+        sta     (CurrentLinePtr),y
         ldy     YRegisterStorage
         rts
 
@@ -6620,7 +6622,7 @@ MenuLengths:
         .byte   6,3,4    ; number of items in each menu
 
 MenuXPositions:
-        .byte   3,13,28         ; FB3D-FB3F
+        .byte   3,13,28
 
 MenuWidths:
         .byte   19,17,21
@@ -6691,29 +6693,29 @@ CursorBlinkRate:
 DisplayedCharAtCursor:
         .byte   $00
 CurrentCursorChar:
-        .byte   HICHAR('_')     ; current cursor
+        .byte   HICHAR('_')
 CharUnderCursor:
-        .byte   $00             ; char under cursor?
+        .byte   $00
 InsertCursorChar:
-        .byte   HICHAR('_')     ; insert cursor
+        .byte   HICHAR('_')
 OverwriteCursorChar:
-        .byte   ' '             ; overwrite cursor (inverse space)
+        .byte   ' ' ; inverse space
 CharANDMask:
-        .byte   %11111111       ; character ANDing mask
+        .byte   %11111111 ; character ANDing mask
 CharORMask:
-        .byte   %00000000       ; character ORing mask (ie., for MSB string)
+        .byte   %00000000 ; character ORing mask (ie., for MSB string)
 SavedMouseSlot:
-        .byte   $00             ; saved mouse slot
+        .byte   $00
 CurrentDocumentPathnameLength:
-        .byte   $00             ; copy of $BDA5 ? (prefix length byte)
+        .byte   $00
 ScratchVal1:
-        .byte   $00             ; scratch byte; used for various purposes
-DocumentUnchangedFlag:          ; set to 0 if the document has changed since last save
-        .byte   $FF
+        .byte   $00 ; scratch byte; used for various purposes
+DocumentUnchangedFlag:
+        .byte   $FF ; set to 0 if the document has changed since last save
 ScratchVal2:
-        .byte   $00             ; scratch byte; used for various purposes
+        .byte   $00 ; scratch byte; used for various purposes
 MacroRemainingLength:
-        .byte   $00             ; # of remaining bytes of macro to inject into input
+        .byte   $00 ; # of remaining bytes of macro to inject into input
 PrinterSlot:
         .byte   1
 
@@ -6721,13 +6723,13 @@ PrinterInitStringRawBytes:
         repeatbyte $00, 20
 
 ;;; 20 chars max
-PrinterInitString:              ; $FBC7
+PrinterInitString:
          msb1pstring "^I80N"
         .byte   $00,$00,$00,$00,$00,$00,$00,$00
         .byte   $00,$00,$00,$00,$00,$00
 
 PrinterLineFeedFlag:
-        .byte   $00             ; if nonzero, does not send line feeds
+        .byte   $00 ; if nonzero, does not send line feeds
 
 PrinterLeftMargin:
         .byte   3
@@ -6829,77 +6831,77 @@ FileTypeTable:
         .byte   FileType::SYS
         highascii "Sys"
 
-LFCF1:  .byte   $00             ; unused
+        .byte   $00 ; unused
 
 MacroTable:
 
 ;;; Macro 1
-        .byte   $44             ; length byte
+        .byte   $44 ; length byte
         highascii "\r EdIt! - by Bill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
-        .byte  "EM"
+        .byte   "EM"
 
 ;;; Macro 2
-        .byte   $0E             ; length byte
+        .byte   $0E ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
-        .byte  "EM"
+        .byte   "EM"
 
 ;;; Macro 3
-        .byte   $00             ; length byte
+        .byte   $00 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
-        .byte "EM"
+        .byte   "EM"
 
 ;;; Macro 4
-        .byte   $00             ; length byte
+        .byte   $00 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
-        .byte "EM"
+        .byte   "EM"
 
 ;;; Macro 5
-        .byte $00               ; length byte
+        .byte   $00 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
-        .byte "EM"
+        .byte   "EM"
 
 ;;; Macro 6
-        .byte   $00             ; length byte
+        .byte   $00 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
-        .byte "EM"
+        .byte   "EM"
 
 ;;; Macro 7
-        .byte   $00             ; length byte
+        .byte   $00 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
-        .byte "EM"
+        .byte   "EM"
 
 ;;; Macro 8
-        .byte   $00             ; length byte
+        .byte   $00 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
-        .byte "EM"
+        .byte   "EM"
 
 ;;; Macro 9
-        .byte   $00             ; length byte
+        .byte   $00 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
-        .byte "EM"
+        .byte   "EM"
 
         .reloc
 
 MainEditor_Code_End := *
-BC00_Code_Start := * ; $5A2D
+BC00_Code_Start := *
 
         .org    $BC00
 
@@ -6932,7 +6934,7 @@ ShutdownRoutine:
         lda     SoftSwitch::RWLCRAMB1
 RAMDiskDriverAddress := * + 1
         jsr     $0000
-LBC3D           := * + 1        ; this is odd...
+LBC3D           := * + 1 ; is this branch target a bug?
         bit     SoftSwitch::RDROMLCB2
         cli
 ;;; If there's a calling program, load & execute it.
@@ -6946,7 +6948,7 @@ LBC46:  lda     SavedPathToCallingProgram,y
         jsr     ProDOS::MLI
         .byte   ProDOS::CGETFILEINFO
         .addr   EditorGetFileInfoParams
-        bne     LBC8A           ; $D0 $33
+        bne     LBC8A
         lda     EditorGetFileInfoFileType
         cmp     #FileType::SYS
         bne     LBC8A
@@ -6955,11 +6957,11 @@ LBC46:  lda     SavedPathToCallingProgram,y
         jsr     ProDOS::MLI
         .byte   ProDOS::COPEN
         .addr   EditorOpenParams
-        bne     LBC8A           ; $D0 $1E
+        bne     LBC8A
         sta     EditorReadWriteBufferAddr ; stores a 0
         lda     EditorOpenRefNum
         sta     EditorReadWriteRefNum
-        lda     #$20
+        lda     #>ProDOS::SysLoadAddress
         sta     EditorReadWriteBufferAddr+1
         jsr     ProDOS::MLI
         .byte   ProDOS::CREAD
@@ -6991,7 +6993,7 @@ JumpToCallingProgram:
         jmp     $0000
 
 SavedPathToCallingProgram:
-        .byte   $00             ; length byte
+        .byte   $00 ; length byte
         repeatbyte $00, ProDOS::MaxPathnameLength
 
 ;;; Reset routine (hooked to reset vector)
@@ -7047,16 +7049,16 @@ CallWaitMonitorRoutine:
         rts
 
 ;;; Makes a MLI call; call # in A, param list address in X (lo), Y (hi)
-MakeMLICall:                    ; $BD46
+MakeMLICall:
         sta     MLICallNumber
         stx     MLICallParamTableAddr
         sty     MLICallParamTableAddr+1
         sta     SoftSwitch::SETSTDZP
         lda     SoftSwitch::RDROMLCB1
         jsr     ProDOS::MLI
-MLICallNumber:                  ; $BD58
+MLICallNumber:
         .byte   $00
-MLICallParamTableAddr:          ; $BD59
+MLICallParamTableAddr:
         .addr   $0000
         sta     SoftSwitch::SETALTZP
         pha
@@ -7065,63 +7067,53 @@ MLICallParamTableAddr:          ; $BD59
         pla
         rts
 
-;;; BD67 - GET_FILE_INFO param list
-;;; BD79 - DESTROY param list
-;;; BD7C - CREATE param list
-;;; BD88 - OPEN param list
-;;; BD8E - CLOSE param list
-;;; BD90 - READ/WRITE param list
-;;; BD99 - SET_PREFIX param list
-;;; BD9C - ON_LINE param list
-;;; BDA0 - SET_MARK param list
-
-EditorGetFileInfoParams:        ; $BD67
-        .byte   $0A   ; param_count
+EditorGetFileInfoParams:
+        .byte   $0A ; param_count
         .addr   ProDOS::SysPathBuf ; pathname
-        .byte   $00   ; access
+        .byte   $00 ; access
 EditorGetFileInfoFileType:
-        .byte   $00   ; file_type
+        .byte   $00 ; file_type
 EditorGetFileInfoAuxType:
         .word   $0000 ; aux_type
-        .byte   $00   ; storage_type
+        .byte   $00 ; storage_type
 EditorGetFileInfoBlocksUsed:
-        .word   $0000 ; blocks_used ; $BD6F
+        .word   $0000 ; blocks_used
         .word   $0000 ; mod_date
         .word   $0000 ; mod_time
         .word   $0000 ; create_date
         .word   $0000 ; create_time
 
-EditorDestroyParams:            ; $BD79
+EditorDestroyParams:
         .byte   $01   ; param_count
         .addr   ProDOS::SysPathBuf ; pathname
 
-EditorCreateParams:             ; $BD7C
-        .byte   $07           ; param_count
-        .addr   PathnameBuffer         ; pathname
-        .byte   %11000011     ; access
+EditorCreateParams:
+        .byte   $07 ; param_count
+        .addr   PathnameBuffer ; pathname
+        .byte   %11000011 ; access
 EditorCreateFileType:
         .byte   FileType::TXT ; file_type
-        .word   $0000         ; aux_type
+        .word   $0000 ; aux_type
         .byte   ProDOS::StorageType::Seedling ; storage_type
-        .word   $0000         ; create_date
-        .word   $0000         ; create_time
+        .word   $0000 ; create_date
+        .word   $0000 ; create_time
 
-EditorOpenParams:       ; $BD88
-        .byte   $03   ; param_count
+EditorOpenParams:
+        .byte   $03 ; param_count
         .addr   ProDOS::SysPathBuf ; pathname
         .addr   DataBuffer ; io_buffer
 EditorOpenRefNum:
-        .byte   $00   ; ref_num
+        .byte   $00 ; ref_num
 
-EditorCloseParams:              ; $BD8E
+EditorCloseParams:
         .byte   $01 ; param_count
 EditorCloseRefNum:
         .byte   $00 ; ref_num
 
-EditorReadWriteParams:          ; $BD90
-        .byte   $04   ; param_count
+EditorReadWriteParams:
+        .byte   $04 ; param_count
 EditorReadWriteRefNum:
-        .byte   $00   ; ref_num
+        .byte   $00 ; ref_num
 EditorReadWriteBufferAddr:
         .addr   $0000 ; data_buffer
 EditorReadWriteRequestCount:
@@ -7133,38 +7125,38 @@ EditorReadWriteRequestCount:
 SingleReturnCharBuffer:
         .byte   ControlChar::Return
 
-EditorSetPrefixParams:          ; $BD99
-        .byte   $01   ; param_count
+EditorSetPrefixParams:
+        .byte   $01 ; param_count
         .addr   ProDOS::SysPathBuf-1 ; pathname
 
-EditorOnLineParams:             ; $BD9C
-        .byte   $02   ; param_count
+EditorOnLineParams:
+        .byte   $02 ; param_count
 EditorOnLineUnitNum:
-        .byte   $00   ; unit_num
+        .byte   $00 ; unit_num
 EditorOnLineDataBuffer:
         .addr   DataBuffer ; data_buffer
 
-EditorSetMarkParams:        ; $BDA0
-        .byte   $02         ; param_count
+EditorSetMarkParams:
+        .byte   $02 ; param_count
 EditorSetMarkRefNum:
-        .byte   $00         ; ref_num
+        .byte   $00 ; ref_num
         .byte   $AE,$37,$00 ; position
 
-PathnameLength:                 ; copy of first byte of PathnameBuffer ($BDA5)
+PathnameLength: ; copy of first byte of PathnameBuffer
         .byte   $00
 
-PrefixBuffer:                   ; $(BDA6)
-        .byte   $00             ; length byte
+PrefixBuffer:
+        .byte   $00 ; length byte
 OnLineBuffer:
         repeatbyte $00, ProDOS::MaxPathnameLength
 
-PathnameBuffer: ; ($BDE7)
-        .byte   $00             ; length byte
+PathnameBuffer:
+        .byte   $00 ; length byte
         repeatbyte $00, ProDOS::MaxPathnameLength
 
 ;;; Path to the Macros file.
 MacrosFilePathnameBuffer:
-        .byte   $00             ; length byte
+        .byte   $00 ; length byte
         repeatbyte $00, ProDOS::MaxPathnameLength
 
 MLIError:
@@ -7216,14 +7208,14 @@ DirectoryEntriesLeftInBlock:
 ScratchVal3:
         .byte   $00
 ScratchVal4:
-        .byte   $00             ; storage for Accumulator, also scratch byte
+        .byte   $00  ; storage for Accumulator, also scratch byte
 ScratchVal5:
-        .byte   $00             ; storage for X register
+        .byte   $00  ; storage for X register
 ScratchVal6:
         .byte   $00
-FileCountInDirectory:           ; word
+FileCountInDirectory: ; word
 YRegisterStorage:
-        .byte   $00             ; storage for Y register
+        .byte   $00 ; storage for Y register
         .byte   $00
 
 CurrentCursorXPos:
@@ -7231,28 +7223,27 @@ CurrentCursorXPos:
 CurrentCursorYPos:
         .byte   $00
 
-LBEA3:  .byte   $00,$00         ; not used
+        .byte   $00,$00 ; unused
 
 DocumentLineCount:
         .word   $0000
 
-LBEA7:  .byte   $00             ; not used
-LBEA8:  .byte   $00             ; not used
+        .byte   $00,$00 ; unused
 
 CurrentLineNumber:
         .word   $0000
 
-LBEAB:  .byte   $00,$00         ; not used
+        .byte   $00,$00 ; unused
 
 ShowCRFlag: ; whether carriage returns are shown (using mousetext)
         .byte   $00
 
-SavedCurLinePtr2:
+SavedCurrentLinePtr2:
         .addr   $0000 ; stores ending line for block delete/copy
 SavedCurrentLineNumber2:
         .word   $0000 ; another place to save CurrentLineNumber
 
-SavedCurLinePtr:
+SavedCurrentLinePtr:
         .addr   $0000
 
 SavedCurrentLineNumber:
@@ -7266,7 +7257,7 @@ ScratchVal9:
 ScratchVal10:
         .byte   $00
 
-LBEB9:  .byte   $00             ; not used
+        .byte   $00 ; unused
 
 ScratchVal11:
         .byte   $00
@@ -7301,7 +7292,7 @@ SendCharacterToPrinter:
         tay
         pla
 PrinterOutputRoutineAddress := *+1
-        jsr     $0000           ; operand is BED9-BEDA
+        jsr     $0000
         rts
 
 ;;; End of code that gets relocated to $BC00
@@ -7310,7 +7301,7 @@ PrinterOutputRoutineAddress := *+1
 
         .reloc
 
-        BC00_Code_End := * ; $5D09
+        BC00_Code_End := *
         D000_Bank2_Data_Start := *
 
         .org $D000
