@@ -26,29 +26,28 @@
 Pointer              := $06 ; used for most text editing operations
 MacroPtr             := $08
 CurrentLinePtr       := $0A
-Pointer4             := $0C ; used for insert/delete and word-wrap
+NextLinePtr          := $0C ; used for insert/delete and word-wrap
 ParamTablePtr        := $1A
 MouseSlot            := $E1
 MenuNumber           := $E2
 MenuItemNumber       := $E3
 MenuItemSelectedFlag := $E4
-Pointer5             := $E5 ; used for clipboard and menu drawing
-Pointer6             := $E7 ; used for search, drawing menus, and input
+Pointer2             := $E5 ; used for clipboard and menu drawing
+Pointer3             := $E7 ; used for search, drawing menus, and input
 MenuDrawingIndex     := $E9
 DialogHeight         := $EA
 DialogWidth          := $EB
 ScreenYCoord         := $EC
 ScreenXCoord         := $ED
-StringPtr            := $EE
+StringPtr            := $EE ; used for string output
 
 ;;; also used: $E0 (written, but never read)
 
-DataBuffer         := $B800 ; 1K I/O buffer up to $BC00, used for ON_LINE, clipboard, etc.
+DataBuffer         := $B800 ; 1K I/O buffer used for ON_LINE, clipboard, etc.
 DataBufferLength   :=  $400
 BlockBuffer        := $1000 ; 512-byte buffer for reading a disk block
 BackingStoreBuffer := $0800 ; Buffer in aux-mem to store text behind menus
 
-LineLength     := 80
 TopMenuLine    :=  2
 MaxMenuLine    :=  8
 TopTextLine    :=  3
@@ -57,7 +56,9 @@ StatusLine     := 23
 LastColumn     := 79
 ColumnCount    := 80
 
-LastClipboardPointer := DataBuffer+DataBufferLength-LineLength
+NumMacros      :=  9
+
+LastClipboardPointer := DataBuffer+DataBufferLength-ColumnCount
 
 VisibleLineCount      := BottomTextLine-TopTextLine+1
 MaxLineCount          := $0458
@@ -219,7 +220,8 @@ L2174:  inc     ZeroPage::A4L
         bne     L215E
         inc     ZeroPage::A4H
         bra     L215E
-;;; Turn on AUX LC RAM bank 2, and copy $1000 bytes of data from $5D09 to it at $D000.
+;;; Turn on AUX LC RAM bank 2, and copy $1000 bytes of data from $5D09
+;;; to it at $D000.
 L217C:  sta     SoftSwitch::SETALTZP
         lda     SoftSwitch::WRLCRAMB2
         lda     SoftSwitch::WRLCRAMB2
@@ -480,7 +482,7 @@ L23A9:  dey
         ldy     GetFileInfoModDate
         ldx     #0
 L23B2:  iny
-        lda     TicEditorFilename,x ; append Macros filename to macros file path
+        lda     TicEditorFilename,x ; append Macros filename to path
         beq     L23BE
         sta     MacrosFilePathnameBuffer,y
         inx
@@ -719,7 +721,7 @@ NoInitialDocument:
         lda     SoftSwitch::RWLCRAMB1
         lda     SoftSwitch::RWLCRAMB1
 StartWithEmptyDocument:
-        jsr     LoadFirstLinePointer
+        jsr     SetCurrentLinePointerToFirstLine
         jsr     MoveCursorToHomePos
         jsr     SetDocumentLineCountToCurrentLine ; empty document
         lda     #$80 ; empty line with CR
@@ -946,7 +948,6 @@ GetFileInfoPathname:
         .byte   $00             ; access
 GetFileInfoFileType:
         .byte   $00
-
         .word   $0000           ; aux_type
         .byte   $00             ; storage_type
         .word   $0000           ; blocks_used
@@ -1167,7 +1168,7 @@ PageUp:
         sec
         sbc     #TopTextLine
         tay
-LD178:  jsr     LoadPreviousLinePointer
+LD178:  jsr     SetCurrentLinePointerToPreviousLine
         dey
         bne     LD178
         lda     #TopTextLine
@@ -1175,7 +1176,7 @@ LD178:  jsr     LoadPreviousLinePointer
         jmp     MainEditorInputLoop
 ;;;  back one screenful
 LD186:  ldy     #VisibleLineCount
-LD188:  jsr     LoadPreviousLinePointer
+LD188:  jsr     SetCurrentLinePointerToPreviousLine
         dey
         bne     LD188
         lda     CurrentLineNumber+1
@@ -1183,7 +1184,7 @@ LD188:  jsr     LoadPreviousLinePointer
         beq     LD19A
         ora     CurrentLineNumber
         bne     LD19D
-LD19A:  jsr     LoadFirstLinePointer
+LD19A:  jsr     SetCurrentLinePointerToFirstLine
 LD19D:  lda     #TopTextLine
         sta     CurrentCursorYPos
         jsr     MainEditorRedrawDocument ; should be a jmp
@@ -1200,7 +1201,7 @@ PageDown:
         ldy     #0
 LD1BA:  jsr     IsOnLastDocumentLine
         beq     LD1C8
-        jsr     LoadNextLinePointer
+        jsr     SetCurrentLinePointerToNextLine
         iny
         cpy     ScratchVal4
         bne     LD1BA
@@ -1210,7 +1211,7 @@ LD1C8:  tya
         sta     CurrentCursorYPos
         jmp     MainEditorInputLoop
 LD1D3:  ldy     #VisibleLineCount
-LD1D5:  jsr     LoadNextLinePointer
+LD1D5:  jsr     SetCurrentLinePointerToNextLine
         jsr     IsOnLastDocumentLine
         beq     LD1E0
         dey
@@ -1267,13 +1268,13 @@ MoveToEndOfLine:
         jsr     GetLengthOfCurrentLine
         and     #%01111111
         cmp     DocumentLineLength
-        bne     LD251
+        bne     @Skip
         dec     a
-LD251:  sta     CurrentCursorXPos
+@Skip:  sta     CurrentCursorXPos
         jmp     MainEditorInputLoop
 
 MoveToBeginningOfDocument:
-        jsr     LoadFirstLinePointer
+        jsr     SetCurrentLinePointerToFirstLine
         stz     CurrentCursorXPos
         lda     #TopTextLine
         sta     CurrentCursorYPos
@@ -1281,12 +1282,12 @@ MoveToBeginningOfDocument:
 
 MoveToEndOfDocument:
         jsr     IsOnLastDocumentLine
-        beq     LD275
-@Loop:  jsr     LoadNextLinePointer
+        beq     @Done
+@Loop:  jsr     SetCurrentLinePointerToNextLine
         jsr     IsOnLastDocumentLine
         bne     @Loop
         jsr     DisplayAllVisibleDocumentLines
-LD275:  jmp     MoveToEndOfLine
+@Done:  jmp     MoveToEndOfLine
 
 ToggleShowCR:
         lda     ShowCRFlag
@@ -1304,7 +1305,7 @@ ClearToEndOfCurrentLine:
         jsr     SetLengthOfCurrentLine ; truncate line
         jsr     IsOnFirstDocumentLine
         beq     LD2C0 ; yes - word wrap rest of line
-        jsr     LoadPreviousLinePointer
+        jsr     SetCurrentLinePointerToPreviousLine
         jsr     GetLengthOfCurrentLine
         bmi     LD2BD ; branch if has CR
         and     #%01111111
@@ -1314,10 +1315,10 @@ ClearToEndOfCurrentLine:
         bge     LD2BD ; branch if no
         sta     CurrentCursorXPos
         jsr     WordWrapUpToNextCR ; word wrap rest of line
-        jsr     LoadNextLinePointer
+        jsr     SetCurrentLinePointerToNextLine
         jsr     MoveToPreviousDocumentLine
         jmp     MainEditorRedrawDocument
-LD2BD:  jsr     LoadNextLinePointer ; word wrap rest of line
+LD2BD:  jsr     SetCurrentLinePointerToNextLine ; word wrap rest of line
 LD2C0:  jsr     WordWrapUpToNextCR
         jsr     MainEditorRedrawDocument
 LD2C6:  jmp     MainEditorInputLoop
@@ -1351,135 +1352,132 @@ ProcessOrdinaryInputChar:
         pha
         jsr     IsCursorAtEndOfLine
         beq     LD374
-        bcc     LD371
+        bcc     LD371 ; past end of line
         lda     CurrentCursorChar
         cmp     InsertCursorChar
-        bne     LD317
-        jmp     LD3CD
-;;; Overwrite mode
-LD317:  ldy     CurrentCursorXPos
+        bne     OverwriteCharacter
+        jmp     InsertCharacter
+OverwriteCharacter: ; overwrite mode
+        ldy     CurrentCursorXPos
         iny
         pla
         jsr     SetCharAtYInCurrentLine
         sty     CurrentCursorXPos
 LD322:  cmp     #' '
         bne     LD36E
-;;; see if the word just completed would fit on the previous line?
+;;; see if the word just completed would fit on the previous line
         jsr     GetSpaceLeftOnPreviousLine
         cmp     CurrentCursorXPos
         blt     LD36E ; no...won't fit
-;;;  copy text up to cursor in current line into INBUF
-        ldy     CurrentCursorXPos
-LD331:  jsr     GetCharAtYInCurrentLine
-        sta     MemoryMap::INBUF,y
+        ldy     CurrentCursorXPos       ; copy text up to cursor
+LD331:  jsr     GetCharAtYInCurrentLine ; in current line
+        sta     MemoryMap::INBUF,y      ; into INBUF
         dey
         bne     LD331
-        ldx     CurrentCursorXPos
+        ldx     CurrentCursorXPos ; set length of text copied
         stx     MemoryMap::INBUF
-;;;  set length of current line to 0
-        stz     CurrentCursorXPos
+        stz     CurrentCursorXPos ; set cursor position to 0
 LD343:  ldy     #1
-        jsr     RemoveCharAtYOnCurrentLine
-        dex
+        jsr     RemoveCharAtYOnCurrentLine ; remove text copied
+        dex                                ; from current lien
         bne     LD343
-        jsr     LoadPreviousLinePointer
+        jsr     SetCurrentLinePointerToPreviousLine
         jsr     GetLengthOfCurrentLine
         tay
         ldx     #0
 LD354:  iny
         inx
-        lda     MemoryMap::INBUF,x
-        jsr     SetCharAtYInCurrentLine
+        lda     MemoryMap::INBUF,x ; append the copied text
+        jsr     SetCharAtYInCurrentLine ; to the previous line
         dec     MemoryMap::INBUF
         bne     LD354
         tya
-        jsr     SetLengthOfCurrentLine
-        jsr     LoadNextLinePointer
-        jsr     WordWrapUpToNextCR
+        jsr     SetLengthOfCurrentLine ; update length of previous line
+        jsr     SetCurrentLinePointerToNextLine
+        jsr     WordWrapUpToNextCR ; re-wrap up to carriage return
         jmp     MainEditorRedrawDocument
 LD36E:  jmp     MainEditorRedrawCurrentLine
 LD371:  jsr     PadLineWithSpacesUpToCursor
 LD374:  ldy     CurrentCursorXPos
         cpy     LastEditableColumn
         bge     LD386
-;;; increment line length by 1
-        jsr     GetLengthOfCurrentLine
+        jsr     GetLengthOfCurrentLine ;;; increment line length by 1
         inc     a
         jsr     SetLengthOfCurrentLine
-        jmp     LD317
+        jmp     OverwriteCharacter
 LD386:  jsr     CheckIfMemoryFull
         bne     LD38E
         jmp     LD435
 LD38E:  jsr     InsertNewLine
         ldy     LastEditableColumn
-LD394:  jsr     GetCharAtYInCurrentLine
-        cmp     #$20
+LD394:  jsr     GetCharAtYInCurrentLine ; search backward for a space
+        cmp     #' '
         beq     LD3A5
         dey
         bne     LD394
         jsr     GetLengthOfCurrentLine
         and     #%01111111
         bra     LD3B0
-LD3A5:  sty     CurrentCursorXPos
+LD3A5:  sty     CurrentCursorXPos ; split line at the space
         jsr     SplitLineAtCursor
         jsr     GetLengthOfCurrentLine
         and     #%01111111
 LD3B0:  jsr     SetLengthOfCurrentLine
         jsr     MoveToNextDocumentLine
-        jsr     GetLengthOfCurrentLine
+        jsr     GetLengthOfCurrentLine ; increment length of next line
         inc     a
         jsr     SetLengthOfCurrentLine
         and     #%01111111
         tay
         pla
-        jsr     SetCharAtYInCurrentLine
+        jsr     SetCharAtYInCurrentLine ; append the char to the next line
         sty     CurrentCursorXPos
-        jsr     WordWrapUpToNextCR
+        jsr     WordWrapUpToNextCR ; word wrap up to next carriage return
         jmp     MainEditorRedrawDocument
-;;; Insert mode
-LD3CD:  jsr     GetLengthOfCurrentLine
-        sta     ScratchVal4
+InsertCharacter: ; Insert mode
+        jsr     GetLengthOfCurrentLine
+        sta     ScratchVal4 ; save line length in temp val
         and     #%01111111
         cmp     LastEditableColumn
-        bge     LD401
+        bge     LD401 ; branch if current line already full
         inc     a
         tay
-        bit     ScratchVal4
-        bpl     LD3E3
+        bit     ScratchVal4 ; increment line length in temp val
+        bpl     LD3E3       ; branch if no CR at end of line
         ora     #%10000000
 LD3E3:  jsr     SetLengthOfCurrentLine
 LD3E6:  dey
-        jsr     GetCharAtYInCurrentLine
-        iny
+        jsr     GetCharAtYInCurrentLine ; shift characters on line to
+        iny                             ; the right
         jsr     SetCharAtYInCurrentLine
         dey
         cpy     CurrentCursorXPos
         beq     LD3F6
         bge     LD3E6
-LD3F6:  pla
-        iny
+LD3F6:  pla                     ; set the char in the newly opened
+        iny                     ; character position
         jsr     SetCharAtYInCurrentLine
         inc     CurrentCursorXPos
         jmp     LD322
 ;;; char won't fit on current line
 LD401:  jsr     CheckIfMemoryFull
         beq     LD435
-        jsr     MoveWordToNextLine
-        jsr     MoveToNextDocumentLine
+        jsr     MoveWordToNextLine ; move last word on line to next line
+        jsr     MoveToNextDocumentLine ; and re-word wrap up to CR
         jsr     WordWrapUpToNextCR
         jsr     DisplayAllVisibleDocumentLines
-        jsr     MoveToPreviousDocumentLine
-        jsr     IsCursorAtEndOfLine
-        bcs     LD3CD
+        jsr     MoveToPreviousDocumentLine ; then try inserting the char
+        jsr     IsCursorAtEndOfLine        ; again
+        bcs     InsertCharacter
         jsr     GetLengthOfCurrentLine
         and     #%01111111
         sta     ScratchVal4
-        lda     CurrentCursorXPos
-        sec
+        lda     CurrentCursorXPos ; move cursor backward to where the
+        sec                       ; char is to be inserted
         sbc     ScratchVal4
         sta     CurrentCursorXPos
         jsr     MoveToNextDocumentLine
-        jmp     LD3CD
+        jmp     InsertCharacter
 
         jsr     PlayTone ; unreachable instruction
 
@@ -1517,7 +1515,7 @@ LD477:  beq     LD4EC
         ldy     #0
 LD480:  iny
         jsr     GetCharAtYInCurrentLine
-        cmp     #$20
+        cmp     #' '
         beq     LD48E
         iny
         cpy     ScratchVal4
@@ -1573,17 +1571,17 @@ LD502:  jsr     GetLengthOfCurrentLine
         sta     CurrentCursorXPos
         jmp     MainEditorRedrawDocument
 
-;;; no label?
+;;; Two Unreachable instructions:
         lda     #$80
         jsr     SetLengthOfCurrentLine
-LD512:  jmp     MainEditorRedrawDocument
 
+LD512:  jmp     MainEditorRedrawDocument
 LD515:  lda     CurrentLineNumber+1
         cmp     DocumentLineCount+1
-        blt     LD512           ; done
+        blt     LD512 ; done
         lda     DocumentLineCount
         cmp     CurrentLineNumber
-        bge     LD512           ; done
+        bge     LD512 ; done
         jsr     MoveToPreviousDocumentLine
         bra     LD502
 
@@ -1698,7 +1696,7 @@ DeleteLinesLoop:
         bge     LD62A ; branch if didn't delete to end of doc
 LD620:  jsr     IsOnFirstDocumentLine
         beq     LD632 ; branch if deleted to start of doc
-        jsr     LoadPreviousLinePointer
+        jsr     SetCurrentLinePointerToPreviousLine
         bra     LD632
 LD62A:  lda     DocumentLineCount ; check if entire doc was deleted
         cmp     CurrentLineNumber
@@ -1706,7 +1704,7 @@ LD62A:  lda     DocumentLineCount ; check if entire doc was deleted
 LD632:  lda     DocumentLineCount
         ora     DocumentLineCount ; bug? should be DocumentLineCount+1?
         bne     LD645
-        jsr     LoadFirstLinePointer ; clear the document
+        jsr     SetCurrentLinePointerToFirstLine ; clear the document
         jsr     SetDocumentLineCountToCurrentLine
         lda     #0
         jsr     SetLengthOfCurrentLine
@@ -1771,20 +1769,20 @@ CopyLineFromClipboard:
 LD6B3:  jsr     CheckIfMemoryFull
         beq     LD6DB ; memory full; can't copy
         jsr     InsertNewLine
-        jsr     LoadNextLinePointer
-        lda     (Pointer5)
+        jsr     SetCurrentLinePointerToNextLine
+        lda     (Pointer2)
         and     #%01111111
         tay
-LD6C3:  lda     (Pointer5),y
+LD6C3:  lda     (Pointer2),y
         jsr     SetCharAtYInCurrentLine
         dey
         bpl     LD6C3
         and     #%01111111
         sec
-        adc     Pointer5 ; increment Pointer5 by the length of
-        sta     Pointer5 ; the line just copied
+        adc     Pointer2 ; increment Pointer2 by the length of
+        sta     Pointer2 ; the line just copied
         bcc     LD6D6
-        inc     Pointer5+1
+        inc     Pointer2+1
 LD6D6:  dec     ClipboardLineCounter ; Decrement # of lines left to copy
         bne     CopyLineFromClipboard
 LD6DB:  jsr     RestoreCurrentLineState
@@ -1828,20 +1826,20 @@ CopyLineToClipboard:
         and     #%01111111
         tay
 LD732:  jsr     GetCharAtYInCurrentLine
-        sta     (Pointer5),y
+        sta     (Pointer2),y
         dey
         bpl     LD732
         and     #%01111111
         sec
-        adc     Pointer5 ; advance Pointer 5 by length
-        sta     Pointer5 ; of line just copied
+        adc     Pointer2 ; advance Pointer 5 by length
+        sta     Pointer2 ; of line just copied
         bcc     LD745
-LD743:  inc     Pointer5+1
+LD743:  inc     Pointer2+1
 LD745:  inc     DataBuffer ; increment line count in clipboard
-        lda     Pointer5+1 ; check if clipboard full
+        lda     Pointer2+1 ; check if clipboard full
         cmp     #>LastClipboardPointer
         blt     LD754
-        lda     Pointer5
+        lda     Pointer2
         cmp     #<LastClipboardPointer
         bge     ClipboardFull
 LD754:  lda     CurrentLineNumber+1 ; check if more left to copy
@@ -1851,7 +1849,7 @@ LD754:  lda     CurrentLineNumber+1 ; check if more left to copy
         lda     CurrentLineNumber
         cmp     SavedCurrentLineNumber
         bge     LD76B
-LD766:  jsr     LoadNextLinePointer
+LD766:  jsr     SetCurrentLinePointerToNextLine
         bra     CopyLineToClipboard
 LD76B:  jsr     RestoreCurrentLineState2
         jmp     FinishClipboardCopy
@@ -1864,16 +1862,16 @@ ClipboardFull:
 ClipboardLineCounter:
         .byte   $00
 
-;;; display "please wait" and load Pointer5 with beginning
+;;; display "please wait" and load Pointer2 with beginning
 ;;; of clipboard data
 DisplayPleaseWaitForClipboard:
         lda     #<TD964 ; "Please wait.."
         ldx     #>TD964
         jsr     DisplayStringInStatusLine
         lda     #<DataBuffer+3
-        sta     Pointer5
+        sta     Pointer2
         lda     #>DataBuffer
-        sta     Pointer5+1
+        sta     Pointer2+1
         rts
 
 EditTabStops:
@@ -1967,7 +1965,7 @@ LD849:  stz     TabStops,x
         dex
         bpl     LD849
         bra     LD862
-;;; Move text tab
+;;; Move to next tab
 LD851:  ldx     ScratchVal1
 LD854:  cpx     LastEditableColumn
         beq     LD85F
@@ -2063,11 +2061,11 @@ LD914:  phx
 LD918:  iny
         lda     SearchText,x
         beq     LD933
-        sta     Pointer6+1
+        sta     Pointer3+1
         jsr     GetCharAtYInCurrentLine
         ora     #%10000000
         jsr     CharToUppercase
-        cmp     Pointer6+1
+        cmp     Pointer3+1
         bne     LD92F
         inx
         bra     LD918
@@ -2115,7 +2113,7 @@ MoveToNextVisibleLine:
         cmp     #BottomTextLine
         beq     @Out
         inc     CurrentCursorYPos
-@Out:   jsr     LoadNextLinePointer
+@Out:   jsr     SetCurrentLinePointerToNextLine
         rts
 
 StartMenuNavigationAtMenuItem:
@@ -2239,7 +2237,6 @@ SelectMenuItem:
         jmp     (MenuItemJumpTable,x)
 
 ShowVolumesDialog:
-;;;  Draw Volumes Online dialog
         jsr     DrawDialogBox
         .byte   17 ; height
         .byte   35 ; width
@@ -2671,7 +2668,7 @@ LDDCB:  jsr     PlayTone
         beq     LDDEA
         cmp     #HICHAR(ControlChar::Return)
         bne     LDDCB
-        jsr     LoadFirstLinePointer
+        jsr     SetCurrentLinePointerToFirstLine
         jsr     SetDocumentLineCountToCurrentLine
         jsr     MoveCursorToHomePos
         lda     #$80
@@ -2899,8 +2896,8 @@ DrawMenu:
         ldy     MenuNumber
         lda     MenuXPositions,y
         dec     a
-        sta     Pointer6+1
-LDFBB:  lda     Pointer6+1
+        sta     Pointer3+1
+LDFBB:  lda     Pointer3+1
         sta     Columns80::OURCH
         jsr     OutputRightVerticalBar
         lda     MenuDrawingIndex
@@ -2911,10 +2908,10 @@ LDFCC:  lda     MenuDrawingIndex
         asl     a
         tay
         iny
-        lda     (Pointer5),y
+        lda     (Pointer2),y
         tax
         dey
-        lda     (Pointer5),y
+        lda     (Pointer2),y
         jsr     DisplayMSB1String
         jsr     SetMaskForNormalText
         jsr     OutputLeftVerticalBar
@@ -2924,7 +2921,7 @@ LDFCC:  lda     MenuDrawingIndex
         ldy     MenuNumber
         cmp     MenuLengths,y
         blt     LDFBB
-        lda     Pointer6+1
+        lda     Pointer3+1
         inc     a
         sta     Columns80::OURCH
         ldy     MenuNumber
@@ -2938,10 +2935,10 @@ LoadMenuItemListPointer:
         asl     a
         tay
         lda     MenuItemListAddresses,y
-        sta     Pointer5
+        sta     Pointer2
         iny
         lda     MenuItemListAddresses,y
-        sta     Pointer5+1
+        sta     Pointer2+1
         rts
 
 DrawMenuBar:
@@ -3332,7 +3329,7 @@ LE369:  lda     ProDOS::SysPathBuf,y
         sta     EditorReadWriteBufferAddr
         lda     #>ProDOS::SysPathBuf
         sta     EditorReadWriteBufferAddr+1
-        jsr     LoadFirstLinePointer ; start first line
+        jsr     SetCurrentLinePointerToFirstLine ; start first line
         jsr     SetDocumentLineCountToCurrentLine
 ReadNextLineFromFile:
         lda     #0
@@ -3363,7 +3360,7 @@ LE3AC:  lda     ProDOS::SysPathBuf
 LE3CD:  jsr     CheckIfMemoryFull ; try to start a new line
         beq     DoneReadingFile ; branch if memory full
         phx
-        jsr     LoadNextLinePointerIntoPointer4 ; save copy of pointer to current line
+        jsr     LoadNextLinePointer
         plx
         ldy     DocumentLineLength
         cpx     #' '
@@ -3381,17 +3378,16 @@ LE3E9:  cpy     #0 ; at beginning of line?
 LE3F2:  ldx     #1 ; can't word-wrap, so add char on next line
         bra     LE411
 LE3F6:  tya
-        jsr     SetLengthOfCurrentLine ; truncate current line at end of last word
+        jsr     SetLengthOfCurrentLine ; truncate line at end of last word
         ldx     #1
-;;; Word wrap logic--I don't quite understand this.
-LE3FC:  iny
+LE3FC:  iny     ; move word into next line
         cpy     DocumentLineLength
         beq     LE411
         jsr     GetCharAtYInCurrentLine
         phy
         phx
         ply
-        jsr     SetCharAtYInLineAtPointer4
+        jsr     SetCharAtYInNextLine
         phy
         plx
         ply
@@ -3400,11 +3396,11 @@ LE3FC:  iny
 ;;; start next line
 LE411:  txa
         tay
-        jsr     SetLengthOfLineAtPointer4
+        jsr     SetLengthOfNextLine
         lda     ProDOS::SysPathBuf
         and     #%01111111
-        jsr     SetCharAtYInLineAtPointer4
-        jsr     LoadNextLinePointer
+        jsr     SetCharAtYInNextLine
+        jsr     SetCurrentLinePointerToNextLine
         jsr     IncrementDocumentLineCount
         jmp     ProcessNextCharFromFile
 LE427:  jsr     GetLengthOfCurrentLine
@@ -3412,7 +3408,7 @@ LE427:  jsr     GetLengthOfCurrentLine
         jsr     SetLengthOfCurrentLine
         jsr     CheckIfMemoryFull
         beq     DoneReadingFile
-        jsr     LoadNextLinePointer
+        jsr     SetCurrentLinePointerToNextLine
         jsr     IncrementDocumentLineCount
         jmp     ReadNextLineFromFile
 LE43D:  cmp     #ProDOS::EEOF
@@ -3432,14 +3428,14 @@ DoneReadingFile:
         cmp     #1
         beq     LE463
 LE460:  jsr     DecrementDocumentLineCount
-LE463:  jsr     LoadFirstLinePointer
+LE463:  jsr     SetCurrentLinePointerToFirstLine
         lda     EditorCreateFileType
         cmp     #FileType::TXT
         beq     LE470
         stz     PathnameBuffer ; non-TXT files can't be overwritten
 LE470:  rts
 ErrorLoadingFile:
-        jsr     LoadFirstLinePointer
+        jsr     SetCurrentLinePointerToFirstLine
         lda     #0
         jsr     SetLengthOfCurrentLine
         jsr     SetDocumentLineCountToCurrentLine
@@ -3479,7 +3475,7 @@ LE48E:  lda     PrefixBuffer,y
         jsr     EditPath ; input new prefix
         bcs     LE4F7
         ldy     ProDOS::SysPathBuf
-LE4C3:  iny
+        iny
         sty     ProDOS::SysPathBuf-1
         lda     #HICHAR('/') ; prepend a slash
         sta     ProDOS::SysPathBuf
@@ -3582,7 +3578,7 @@ LE593:  lda     ProDOS::SysPathBuf,y
         jsr     OpenFile ; open the file
         bne     LE60D
         jsr     SaveCurrentLineState2
-        jsr     LoadFirstLinePointer
+        jsr     SetCurrentLinePointerToFirstLine
         stz     EditorReadWriteRequestCount+1
 LE5B5:  jsr     CopyCurrentLineToSysPathBuf
         lda     #<ProDOS::SysPathBuf+1
@@ -3613,7 +3609,7 @@ LE5E8:  lda     #<SingleReturnCharBuffer ; write a single CR char to file
         bra     LE5C7
 LE5F6:  jsr     IsOnLastDocumentLine
         beq     LE600
-        jsr     LoadNextLinePointer
+        jsr     SetCurrentLinePointerToNextLine
         bra     LE5B5 ; branch to write the next line
 LE600:  jsr     CloseFile ; close file
         jsr     RestoreCurrentLineState2
@@ -3856,13 +3852,13 @@ DisplayProDOSErrorAndWaitForKeypress:
         jsr     SetCursorPosToXY
         ldy     MLIErrorTable
         lda     MLIError
-LE7BC:  cmp     MLIErrorTable,y
-        beq     LE7C9
+@Loop:  cmp     MLIErrorTable,y
+        beq     @Found
         dey
-        bne     LE7BC
-        jsr     Monitor::PRBYTE ; Would crash - ROM not paged in
+        bne     @Loop
+        jsr     Monitor::PRBYTE ; bug; Would crash - ROM not paged in
         ldy     #0
-LE7C9:  tya
+@Found: tya
         asl     a
         tay
         lda     MLIErrorMessageTable+1,y
@@ -3914,7 +3910,7 @@ LE81F:  lda     PrefixBuffer,y
         bpl     LE81F
         jsr     OpenDirectoryAndReadHeader
         bcs     LE88B ; branch on error
-        jsr     LoadFirstLinePointer
+        jsr     SetCurrentLinePointerToFirstLine
         lda     FileCountInDirectory
         sta     DirectoryEntriesLeftToList
         sta     DocumentLineCount
@@ -3939,10 +3935,10 @@ LE859:  lda     MemoryMap::INBUF,y
         cmp     #$FF
         bne     LE86F
         dec     DirectoryEntriesLeftToList+1
-LE86F:  jsr     LoadNextLinePointer
+LE86F:  jsr     SetCurrentLinePointerToNextLine
         bra     LE842
 ;;; clean up & return
-LE874:  jsr     LoadFirstLinePointer
+LE874:  jsr     SetCurrentLinePointerToFirstLine
         jsr     SetDocumentLineCountToCurrentLine
         lda     #$80
         jsr     SetLengthOfCurrentLine
@@ -3967,7 +3963,7 @@ LE890:  jsr     CloseFile
 LE8A8:  bra     LE874
 LE8AA:  lda     #12  ; highlight top entry
         sta     DirectoryListHighlightedRow
-        jsr     LoadFirstLinePointer
+        jsr     SetCurrentLinePointerToFirstLine
 RedrawDirectoryListingScrollArea:
         jsr     SaveCurrentLineState2
         ldy     #12
@@ -3990,12 +3986,12 @@ LE8D3:  jsr     DisplayString
         jsr     SetMaskForNormalText
         jsr     IsOnLastDocumentLine
         beq     LE8EE
-        jsr     LoadNextLinePointer
+        jsr     SetCurrentLinePointerToNextLine
         ldy     ZeroPage::CV
         iny
         cpy     #BottomTextLine
         blt     LE8B7
-        jsr     LoadPreviousLinePointer
+        jsr     SetCurrentLinePointerToPreviousLine
 LE8EE:  ldy     #StatusLine
         ldx     #32
         jsr     SetCursorPosToXY
@@ -4025,7 +4021,7 @@ LE91C:  lda     DirectoryListHighlightedRow
         jsr     IsOnLastDocumentLine
         beq     DirectoryListingGetKeypress
         jsr     RestoreCurrentLineState2
-        jsr     LoadNextLinePointer ; scroll up one line
+        jsr     SetCurrentLinePointerToNextLine ; scroll up one line
         jmp     RedrawDirectoryListingScrollArea
 LE931:  inc     a
         sta     DirectoryListHighlightedRow
@@ -4044,7 +4040,7 @@ LE93B:  jsr     SaveCurrentLineState
 LE952:  lda     DirectoryListHighlightedRow
         cmp     #13
         bge     LE95F ; branch if not on top visible entry
-        jsr     LoadPreviousLinePointer
+        jsr     SetCurrentLinePointerToPreviousLine
         jmp     RedrawDirectoryListingScrollArea
 LE95F:  dec     a ; scroll down one line
         sta     DirectoryListHighlightedRow
@@ -4116,7 +4112,7 @@ SkipPaddingBytesInDirectoryBlock:
         lda     #5
         bra     LE9DB
 ReadNextDirectoryEntryInBlock:
-LE9D9:  lda     #39
+        lda     #39
 LE9DB:  sta     EditorReadWriteRequestCount
 ReadFromDirectoryBlock:
         lda     #ProDOS::CREAD
@@ -4673,15 +4669,15 @@ TriggerMacroNumberY:
         jsr     LoadMacroPointer
         lda     (MacroPtr)
         sta     MacroRemainingLength
-        beq     LEDBC
+        beq     @Done ; zero-length macro
         inc     MacroPtr
-        bne     LEDB0
+        bne     @Skip
         inc     MacroPtr+1
-LEDB0:  lda     CharUnderCursor
+@Skip:  lda     CharUnderCursor
         jsr     WriteCharToScreen
         stz     SoftSwitch::KBDSTRB
         jmp     GetKeypress
-LEDBC:  stz     SoftSwitch::KBDSTRB
+@Done:  stz     SoftSwitch::KBDSTRB
         lda     CharUnderCursor
         jsr     WriteCharToScreen
         jmp     GetKeypress
@@ -4780,9 +4776,9 @@ FormatDate:
         ldx     #HICHAR('0')-1
         jsr     ConvertToBase10
         cpx     #HICHAR('0')
-        bne     LEE6A
+        bne     @Skip
         ldx     #HICHAR(' ')
-LEE6A:  stx     DateTimeFormatString+2
+@Skip:  stx     DateTimeFormatString+2
         sta     DateTimeFormatString+3
         lda     DateLoByte
         and     #%11100000
@@ -4792,12 +4788,12 @@ LEE6A:  stx     DateTimeFormatString+2
         lsr     a
         tay
         ldx     #0
-LEE7E:  lda     MonthNames-3,y
+@Loop:  lda     MonthNames-3,y
         sta     DateTimeFormatString+5,x
         iny
         inx
         cpx     #4
-        blt     LEE7E
+        blt     @Loop
         lda     DateHiByte
         ldx     #HICHAR('0')-1
         jsr     ConvertToBase10
@@ -4876,24 +4872,26 @@ DrawCurrentDocumentLine:
 DisplayAllVisibleDocumentLines:
         jsr     SaveCurrentLineState2
         ldy     CurrentCursorYPos
-LEF16:  cpy     #TopTextLine
-        beq     LEF20
-        jsr     LoadPreviousLinePointer
+@Loop:  cpy     #TopTextLine
+        beq     @GotTopLine
+        jsr     SetCurrentLinePointerToPreviousLine
         dey
-        bra     LEF16
-LEF20:  ldx     #0
+        bra     @Loop
+@GotTopLine:
+        ldx     #0
         jsr     SetCursorPosToXY
-LEF25:  jsr     DrawCurrentDocumentLine
+@Loop2: jsr     DrawCurrentDocumentLine
         lda     ZeroPage::CV
         cmp     #BottomTextLine
-        beq     LEF3E
+        beq     @Done
         jsr     IsOnLastDocumentLine
-        beq     LEF3B
+        beq     @ClearRemaining
         jsr     MoveTextOutputPosToStartOfNextLine
-        jsr     LoadNextLinePointer
-        bra     LEF25
-LEF3B:  jsr     ClearTextWindowFromCursor
-LEF3E:  jsr     RestoreCurrentLineState2
+        jsr     SetCurrentLinePointerToNextLine
+        bra     @Loop2
+@ClearRemaining:
+        jsr     ClearTextWindowFromCursor
+@Done:  jsr     RestoreCurrentLineState2
         rts
 
 DisplayDefaultStatusText:
@@ -5074,10 +5072,10 @@ DrawDialogBox:
 ;;;  ParamTablePtr now points to 1 byte before the start of the param table
 ;;;  copy first 4 bytes of param table to $EA - $ED
         ldy     #4
-LF066:  lda     (ParamTablePtr),y
+@Loop:  lda     (ParamTablePtr),y
         sta     DialogHeight-1,y
         dey
-        bne     LF066
+        bne     @Loop
         jsr     DrawDialogBoxFrame
         jsr     SetMaskForInverseText
         ldy     #5
@@ -5098,9 +5096,9 @@ LF066:  lda     (ParamTablePtr),y
         clc
         adc     #7
         sta     ParamTablePtr
-        bcc     LF097
+        bcc     @Skip
         inc     ParamTablePtr+1
-LF097:  lda     ParamTablePtr+1
+@Skip:  lda     ParamTablePtr+1
         pha
         lda     ParamTablePtr
         pha
@@ -5198,9 +5196,9 @@ CharToUppercase:
 ;;; from the backing store buffer.
 RestoreScreenAreaUnderMenus:
         lda     #<BackingStoreBuffer
-        sta     Pointer6
+        sta     Pointer3
         lda     #>BackingStoreBuffer
-        sta     Pointer6+1
+        sta     Pointer3+1
         lda     #TopMenuLine
 @LineLoop:
         jsr     ComputeTextOutputPos
@@ -5209,17 +5207,17 @@ RestoreScreenAreaUnderMenus:
 @CharLoop:
         ldy     Columns80::OURCH
         sta     SoftSwitch::RDCARDRAM
-        lda     (Pointer6),y
+        lda     (Pointer3),y
         sta     SoftSwitch::RDMAINRAM
         jsr     WriteCharToScreen
         dec     Columns80::OURCH
         bpl     @CharLoop
-        lda     Pointer6
+        lda     Pointer3
         clc
         adc     #ColumnCount
-        sta     Pointer6
+        sta     Pointer3
         bcc     @Skip
-        inc     Pointer6+1
+        inc     Pointer3+1
 @Skip:  lda     ZeroPage::CV
         cmp     #MaxMenuLine+1
         bge     @Out
@@ -5231,9 +5229,9 @@ RestoreScreenAreaUnderMenus:
 ;;; to the backing store buffer.
 SaveScreenAreaUnderMenus:
         lda     #<BackingStoreBuffer
-        sta     Pointer6
+        sta     Pointer3
         lda     #>BackingStoreBuffer
-        sta     Pointer6+1
+        sta     Pointer3+1
         lda     #TopMenuLine
 @LineLoop:
         jsr     ComputeTextOutputPos
@@ -5243,16 +5241,16 @@ SaveScreenAreaUnderMenus:
         jsr     ReadCharFromScreen
         ldy     Columns80::OURCH
         sta     SoftSwitch::WRCARDRAM
-        sta     (Pointer6),y
+        sta     (Pointer3),y
         sta     SoftSwitch::WRMAINRAM
         dec     Columns80::OURCH
         bpl     @CharLoop
-        lda     Pointer6
+        lda     Pointer3
         clc
         adc     #ColumnCount
-        sta     Pointer6
+        sta     Pointer3
         bcc     @Skip
-        inc     Pointer6+1
+        inc     Pointer3+1
 @Skip:  lda     ZeroPage::CV
         cmp     #MaxMenuLine+1
         bge     @Out
@@ -5498,7 +5496,7 @@ LF37B:  jsr     GetKeypress ; input routine
         bra     LF37B
 ;;; print from start
 LF392:  pha
-        jsr     LoadFirstLinePointer
+        jsr     SetCurrentLinePointerToFirstLine
         pla
 ;;; print from cursor
 LF397:  jsr     OutputCharAndAdvanceScreenPos
@@ -5548,7 +5546,7 @@ LF3EF:  jsr     DeterminePrinterOutputRoutineAddress
         sta     PrinterLineFeedFlag
         jmp     LF417
 FoundPrinter:
-LF3FA:  ldy     #$0D; get PInit entry point
+        ldy     #$0D; get PInit entry point
         lda     (Pointer),y
         sta     PrinterOutputRoutineAddress
         stz     PrinterLineFeedFlag
@@ -5587,7 +5585,7 @@ LF445:  jsr     SendLineToPrinter
         beq     LF463
 LF454:  jsr     IsOnLastDocumentLine
         beq     LF463
-        jsr     LoadNextLinePointer
+        jsr     SetCurrentLinePointerToNextLine
         dec     ScratchVal4
         bne     LF445
         bra     LF43B
@@ -5599,14 +5597,16 @@ LF463:  lda     #ControlChar::ControlL ; form feed
 
 SendLineToPrinter:
         ldy     PrinterLeftMargin ; loop to print
-        beq     LF47B             ; left margin spaces
-LF471:  lda     #' '
+        beq     @AfterMargin      ; left margin spaces
+@MarginLoop:
+        lda     #' '
         phy
         jsr     SendCharacterToPrinter
         ply
         dey
-        bne     LF471
-LF47B:  jsr     CopyCurrentLineToSysPathBuf
+        bne     @MarginLoop
+@AfterMargin:
+        jsr     CopyCurrentLineToSysPathBuf
         lda     #<ProDOS::SysPathBuf
         ldx     #>ProDOS::SysPathBuf
 SendLineAtAXToPrinter:
@@ -5615,22 +5615,24 @@ SendLineAtAXToPrinter:
         lda     (Pointer)
         and     #%01111111
         sta     ScratchVal1 ; length of line to print
-        beq     LF4A4
+        beq     @EndOfLine
         lda     #1
         sta     ScratchVal6
-LF494:  ldy     ScratchVal6 ; offset of char in line
+@CharLoop:
+        ldy     ScratchVal6 ; offset of char in line
         lda     (Pointer),y
         jsr     SendCharacterToPrinter
         inc     ScratchVal6
         dec     ScratchVal1
-        bne     LF494
-LF4A4:  lda     #ControlChar::Return
+        bne     @CharLoop
+@EndOfLine:
+        lda     #ControlChar::Return
         jsr     SendCharacterToPrinter
         lda     PrinterLineFeedFlag
-        bne     LF4B3
+        bne     @Out
         lda     #HICHAR(ControlChar::ControlJ) ; line feed
         jsr     SendCharacterToPrinter
-LF4B3:  rts
+@Out:   rts
 
 DisableCSW:
         lda     ZeroPage::CSWL
@@ -5662,13 +5664,13 @@ RestoreCSW:
 ;;; A single-line input routine. Maximum length+1 passed in A.
 ;;; Returns with Carry set if input was cancelled with Esc.
 InputSingleLine:
-        sta     Pointer6+1
+        sta     Pointer3+1
         lda     Columns80::OURCH
         sta     MenuDrawingIndex
 @RedisplayInput:
         lda     MenuDrawingIndex
         sta     Columns80::OURCH
-        ldy     Pointer6+1
+        ldy     Pointer3+1
         jsr     OutputSpaces
         lda     MenuDrawingIndex
         sta     Mouse::MOUXH+3
@@ -5695,7 +5697,7 @@ InputSingleLine:
 @ValidChar:
         ldy     ProDOS::SysPathBuf
         iny
-        cpy     Pointer6+1
+        cpy     Pointer3+1
         bge     @BadChar
         sta     ProDOS::SysPathBuf,y
         sty     ProDOS::SysPathBuf
@@ -5731,9 +5733,9 @@ DisplayAXInHexadecimal:
 @NibbleToHex:
         ora     #HICHAR('0')
         cmp     #HICHAR(':')
-        blt     LF559
+        blt     @Skip
         adc     #6
-LF559:  jmp     OutputCharAndAdvanceScreenPos
+@Skip:  jmp     OutputCharAndAdvanceScreenPos
 
 ;;; Display AX in decimal, with width of Y
 DisplayAXInDecimal:
@@ -5877,7 +5879,7 @@ IsOnFirstDocumentLine:
         lda     CurrentLineNumber+1
 @Out:   rts
 
-LoadPreviousLinePointer:
+SetCurrentLinePointerToPreviousLine:
         jsr     DecrementCurrentLineNumber
         jsr     LoadCurrentLinePointerIntoAX
         sta     CurrentLinePtr
@@ -5925,7 +5927,7 @@ LoadLineAXPointerIntoAX:
         ply
         rts
 
-LoadNextLinePointer:
+SetCurrentLinePointerToNextLine:
         jsr     IncrementCurrentLineNumber
         jsr     LoadCurrentLinePointerIntoAX
         sta     CurrentLinePtr
@@ -5946,8 +5948,8 @@ IncrementCurrentLineNumber:
         bcc     LF6C9
         inx
 LF6C9:  jsr     LoadLineAXPointerIntoAX_1
-        sta     Pointer4
-        stx     Pointer4+1
+        sta     NextLinePtr
+        stx     NextLinePtr+1
         rts
 
 MoveToPreviousDocumentLine:
@@ -5956,11 +5958,11 @@ MoveToPreviousDocumentLine:
         cmp     #TopTextLine
         beq     @DoScroll
         dec     CurrentCursorYPos
-        jsr     LoadPreviousLinePointer
+        jsr     SetCurrentLinePointerToPreviousLine
         rts
 @DoScroll:
         jsr     ScrollDownOneLine
-        jsr     LoadPreviousLinePointer
+        jsr     SetCurrentLinePointerToPreviousLine
         jsr     DrawCurrentDocumentLine
         rts
 
@@ -5970,11 +5972,11 @@ MoveToNextDocumentLine:
         cmp     #BottomTextLine
         beq     @DoScroll
         inc     CurrentCursorYPos
-        jsr     LoadNextLinePointer
+        jsr     SetCurrentLinePointerToNextLine
         rts
 @DoScroll:
         jsr     ScrollUpOneLine
-        jsr     LoadNextLinePointer
+        jsr     SetCurrentLinePointerToNextLine
         jsr     DrawCurrentDocumentLine
         rts
 
@@ -6024,7 +6026,7 @@ SkipNonSpacesForward:
 @Out:   rts
 
 ;;; set current line to 1 and load it into CurrentLinePtr.
-LoadFirstLinePointer:
+SetCurrentLinePointerToFirstLine:
         stz     CurrentLineNumber+1
         lda     #1
         sta     CurrentLineNumber
@@ -6058,14 +6060,14 @@ LF769:  jsr     SetLengthOfCurrentLine
 
 ;;; If on the last line of the doc, set its length to 0.
 ;;; Otherwise insert a new line. The newly inserted line
-;;; will be at Pointer4.
+;;; will be at NextLinePtr.
 InsertNewLine:
-        jsr     LoadNextLinePointerIntoPointer4
+        jsr     LoadNextLinePointer
         jsr     IsOnLastDocumentLine
         beq     LF778
         jsr     ShiftLinePointersDownForInsert
 LF778:  lda     #0
-        jsr     SetLengthOfLineAtPointer4
+        jsr     SetLengthOfNextLine
 
 IncrementDocumentLineCount:
         inc     DocumentLineCount
@@ -6096,15 +6098,15 @@ SplitLineAtCursor:
         jsr     GetLengthOfCurrentLine
         bpl     LF7B1 ; branch if no CR at end of line
         lda     #$80
-        jsr     SetLengthOfLineAtPointer4 ; empty line with CR
+        jsr     SetLengthOfNextLine ; empty line with CR
         jsr     GetLengthOfCurrentLine
         and     #%01111111
 LF7B1:  sta     ScratchVal4 ; saved line length
         sec
         sbc     CurrentCursorXPos ; decrement it by length before cursor
         sta     ScratchVal4
-        beq     LF7E8           ; if 0, current line will be an empty line with CR
-        tya                     ; new length of current line is length before cursor
+        beq     LF7E8 ; if 0, current line will be an empty line with CR
+        tya            ; new length of current line is length before cursor
         ora     #%10000000 ; add CR
         jsr     SetLengthOfCurrentLine
         ldx     #1
@@ -6113,7 +6115,7 @@ LF7C5:  iny     ; then copy text after cursor to other line
         phy
         phx
         ply
-        jsr     SetCharAtYInLineAtPointer4
+        jsr     SetCharAtYInNextLine
         phy
         plx
         ply
@@ -6121,13 +6123,13 @@ LF7C5:  iny     ; then copy text after cursor to other line
         dec     ScratchVal4
         bne     LF7C5
         dex
-        jsr     GetLengthOfLineAtPointer4
+        jsr     GetLengthOfNextLine
         bpl     LF7E3
         txa
         ora     #%10000000 ; add back CR
         bra     LF7E4
 LF7E3:  txa
-LF7E4:  jsr     SetLengthOfLineAtPointer4
+LF7E4:  jsr     SetLengthOfNextLine
 LF7E7:  rts
 LF7E8:  jsr     GetLengthOfCurrentLine
         bmi     LF7E7
@@ -6138,15 +6140,15 @@ LF7E8:  jsr     GetLengthOfCurrentLine
 ;;; 1 from the line number before accessing the line
 ;;; pointer table, it's actually loading the pointer to
 ;;; the line following the current line.
-LoadNextLinePointerIntoPointer4:
+LoadNextLinePointer:
         ldx     CurrentLineNumber+1
         lda     CurrentLineNumber
         jsr     LoadLineAXPointerIntoAX
-        sta     Pointer4
-        stx     Pointer4+1
+        sta     NextLinePtr
+        stx     NextLinePtr+1
         rts
 
-;;; The newly inserted line will be at Pointer4.
+;;; The newly inserted line will be at NextLinePtr.
 ShiftLinePointersDownForInsert:
         jsr     SaveCurrentLineState2
         inc     SavedCurrentLineNumber2
@@ -6160,7 +6162,7 @@ ShiftLinePointersDownForInsert:
         pha
         phx
         bra     @First
-@Loop:  jsr     LoadPreviousLinePointer
+@Loop:  jsr     SetCurrentLinePointerToPreviousLine
 @First: jsr     LoadCurrentLinePointerIntoAX
         ldy     #2
         sta     (Pointer),y
@@ -6179,8 +6181,8 @@ ShiftLinePointersDownForInsert:
         pla
         sta     (Pointer)
         jsr     RestoreCurrentLineState2
-        jsr     LoadPreviousLinePointer
-        jsr     LoadNextLinePointerIntoPointer4
+        jsr     SetCurrentLinePointerToPreviousLine
+        jsr     LoadNextLinePointer
         rts
 
 ShiftLinePointersUpForDelete:
@@ -6208,93 +6210,94 @@ ShiftLinePointersUpForDelete:
         jsr     LoadCurrentLinePointerIntoAX
         sta     CurrentLinePtr
         stx     CurrentLinePtr+1
-        jsr     LoadNextLinePointerIntoPointer4
+        jsr     LoadNextLinePointer
 @Out:   rts
 
 ;;; Word-wraps (reflows) the text up to the next CR
 ;;; (the end of the text line).
 WordWrapUpToNextCR:
         jsr     SaveCurrentLineState2
-        stz     ScratchVal11
+        stz     WordWrapScratchVal4 ; Val4 = 0
 LF88E:  jsr     IsOnLastDocumentLine
         bne     LF896
-LF893:  jmp     LF94D
+LF893:  jmp     WordWrapDone
 LF896:  jsr     GetLengthOfCurrentLine
-        bmi     LF893
+        bmi     LF893 ; branch if line ends with CR
         cmp     DocumentLineLength
-        bge     LF893
-        jsr     LoadNextLinePointerIntoPointer4
+        bge     LF893 ; branch if line full
+        jsr     LoadNextLinePointer
         jsr     GetLengthOfCurrentLine
-        sta     ScratchVal8
-        jsr     GetLengthOfLineAtPointer4
-        bpl     LF8B2
+        sta     WordWrapScratchVal1 ; Val1 = length of current line
+        jsr     GetLengthOfNextLine
+        bpl     LF8B2 ; branch if no CR
         and     #%01111111
-        beq     LF893
-LF8B2:  sta     ScratchVal9
-        lda     DocumentLineLength
-        sec
-        sbc     ScratchVal8
+        beq     LF893 ; branch if line empty
+LF8B2:  sta     WordWrapScratchVal2 ; Val2 = length of next line
+        lda     DocumentLineLength  ; calculate space left on
+        sec                         ; current line
+        sbc     WordWrapScratchVal1
         cmp     #2
-        blt     LF893
-        tay
-        cmp     ScratchVal9
-        blt     LF8DD
-        ldy     ScratchVal9
-        jsr     GetLengthOfLineAtPointer4
-        and     #%10000000
+        blt     LF893 ; branch if only 1 char of space left
+        tay     ; Y = space left
+        cmp     WordWrapScratchVal2 ; enough space for all text on next line?
+        blt     LF8DD               ; branch if no
+        ldy     WordWrapScratchVal2 ; Y = length of next line
+        jsr     GetLengthOfNextLine ; if next line has a CR,
+        and     #%10000000                ; add a CR to the current line
         sta     ScratchVal2
         jsr     GetLengthOfCurrentLine
         ora     ScratchVal2
         jsr     SetLengthOfCurrentLine
-        jmp     LF8E9
-LF8DD:  jsr     GetCharAtYInLineAtPointer4
-        cmp     #$20
-        beq     LF8E9
+        jmp     LF8E9 ; branch to the move logic
+LF8DD:  jsr     GetCharAtYInNextLine ; search backward in next line
+        cmp     #' ' ; for a space, so that only whole words are moved
+        beq     LF8E9 ; branch if found
         dey
         bne     LF8DD
-        beq     LF94D
-LF8E9:  sty     ScratchVal11
-        sty     ScratchVal10
-LF8EF:  jsr     GetCharAtYInLineAtPointer4
-        sta     ProDOS::SysPathBuf,y
+        beq     WordWrapDone
+LF8E9:  sty     WordWrapScratchVal4 ; Val4 = number of chars to move
+        sty     WordWrapScratchVal3 ; Val3 = number of chars to move
+LF8EF:  jsr     GetCharAtYInNextLine ; copy text up to Y in next line
+        sta     ProDOS::SysPathBuf,y       ; to SysPathBuf
         dey
         bne     LF8EF
-        lda     ScratchVal8
-        tay
+        lda     WordWrapScratchVal1 ; update length of current line
+        tay                         ; by number of chars moved
         clc
-        adc     ScratchVal10
+        adc     WordWrapScratchVal3
         sta     ScratchVal4
-        jsr     GetLengthOfCurrentLine
+        jsr     GetLengthOfCurrentLine ; and preserve CR flag
         and     #%10000000
         ora     ScratchVal4
         jsr     SetLengthOfCurrentLine
-        lda     ScratchVal10
+        lda     WordWrapScratchVal3
         sta     ScratchVal4
         ldx     #1
 LF916:  iny
-        lda     ProDOS::SysPathBuf,x
-        jsr     SetCharAtYInCurrentLine
+        lda     ProDOS::SysPathBuf,x ; copy text from SysPathBuf to end
+        jsr     SetCharAtYInCurrentLine ; of current line
         inx
         dec     ScratchVal4
         bne     LF916
-        jsr     IsOnLastDocumentLine
-        beq     LF94D
-        jsr     LoadNextLinePointer
-LF92B:  ldy     #1
+        jsr     IsOnLastDocumentLine ; if this is the last line in the
+        beq     WordWrapDone         ; document, then all done
+        jsr     SetCurrentLinePointerToNextLine  ; remove text that was moved
+LF92B:  ldy     #1                   ; from the front of the next line
         jsr     RemoveCharAtYOnCurrentLine
         lda     ScratchVal4
         beq     LF93A
-        dec     ScratchVal10
+        dec     WordWrapScratchVal3
         bne     LF92B
 LF93A:  jsr     GetLengthOfCurrentLine
         and     #%01111111
-        beq     LF944
-        jmp     LF88E
-LF944:  jsr     ShiftLinePointersUpForDelete
-        jsr     LoadPreviousLinePointer
+        beq     LF944 ; branch if the line is now empty
+        jmp     LF88E ; continue word-wrap on next line
+LF944:  jsr     ShiftLinePointersUpForDelete ; delete the empty line
+        jsr     SetCurrentLinePointerToPreviousLine
         jsr     DecrementDocumentLineCount
-LF94D:  jsr     RestoreCurrentLineState2
-        lda     ScratchVal11
+WordWrapDone:
+        jsr     RestoreCurrentLineState2
+        lda     WordWrapScratchVal4
         rts
 
 ;;; Returns the amount of space left on the previous line,
@@ -6302,44 +6305,46 @@ LF94D:  jsr     RestoreCurrentLineState2
 ;;; with a CR; otherwise returns 0.
 GetSpaceLeftOnPreviousLine:
         jsr     IsOnFirstDocumentLine
-        beq     LF974
-        jsr     LoadPreviousLinePointer
+        beq     @IsFirst
+        jsr     SetCurrentLinePointerToPreviousLine
         jsr     GetLengthOfCurrentLine
-        bmi     LF971 ; branch if ends in CR
+        bmi     @HasCR ; branch if ends in CR
         sta     ScratchVal2
         lda     DocumentLineLength
         sec
         sbc     ScratchVal2
         pha
-        jsr     LoadNextLinePointer
+        jsr     SetCurrentLinePointerToNextLine
         pla
         rts
-LF971:  jsr     LoadNextLinePointer
-LF974:  lda     #0
+@HasCR: jsr     SetCurrentLinePointerToNextLine
+@IsFirst:
+        lda     #0
         rts
 
 RemoveCharAtYOnCurrentLine:
         jsr     GetLengthOfCurrentLine
         and     #%01111111
         sta     ScratchVal4
-        beq     LF9A1
+        beq     @Out
 ;;;  loop to shift characters from Y to end of line left by 1
-LF981:  cpy     ScratchVal4
-        bge     LF993
+@Loop:  cpy     ScratchVal4
+        bge     @UpdateLength
         iny
         jsr     GetCharAtYInCurrentLine
         dey
-        beq     LF990
+        beq     @Skip
         jsr     SetCharAtYInCurrentLine
-LF990:  iny
-        bra     LF981
+@Skip:  iny
+        bra     @Loop
 ;;; decrement length of current line
-LF993:  dec     ScratchVal4
+@UpdateLength:
+        dec     ScratchVal4
         jsr     GetLengthOfCurrentLine
         and     #%10000000
         ora     ScratchVal4
         jsr     SetLengthOfCurrentLine
-LF9A1:  rts
+@Out:   rts
 
 ;;; moves current word to next line if it won't fit on current one
 MoveWordToNextLine:
@@ -6356,9 +6361,9 @@ LF9A9:  jsr     GetCharAtYInCurrentLine
 LF9B6:  cpy     LastEditableColumn
         bne     LF9CA
         ldy     #1 ; put char on next line
-        jsr     SetCharAtYInLineAtPointer4
+        jsr     SetCharAtYInNextLine
         tya
-        jsr     SetLengthOfLineAtPointer4
+        jsr     SetLengthOfNextLine
         jsr     GetLengthOfCurrentLine
         dec     a
         bra     LF9DB
@@ -6371,16 +6376,18 @@ LF9CA:  lda     CurrentCursorXPos ; truncate current line at cursor pos
         jsr     GetLengthOfCurrentLine
 LF9DB:  and     #%01111111
         jsr     SetLengthOfCurrentLine
-        jsr     LoadNextLinePointer ; word-wrap after the break
+        jsr     SetCurrentLinePointerToNextLine ; word-wrap after the break
         jsr     WordWrapUpToNextCR
-        jsr     LoadPreviousLinePointer
+        jsr     SetCurrentLinePointerToPreviousLine
         rts
 
 GetLengthOfCurrentLine:
+;;;  A = *CurrentLinePtr
         sty     YRegisterStorage
         ldy     #0
         bra     LF9F4
 GetCharAtYInCurrentLine:
+;;; A = *(CurrentLinePtr + Y)
         sty     YRegisterStorage
 LF9F4:  lda     CurrentLinePtr
         lsr     a
@@ -6395,32 +6402,34 @@ LFA01:  pha
 LFA07:  lda     (CurrentLinePtr),y
         bra     LFA01
 
-GetLengthOfLineAtPointer4:
-;;; loads A from *Pointer4
+GetLengthOfNextLine:
+;;; A = *NextLinePtr
         sty     YRegisterStorage
         ldy     #0
         bra     LFA15
-;;; Loads a from *(Pointer4 + Y)
-GetCharAtYInLineAtPointer4:
+;;; A = *(NextLinePtr + Y)
+GetCharAtYInNextLine:
         sty     YRegisterStorage
-LFA15:  lda     Pointer4
+LFA15:  lda     NextLinePtr
         lsr     a
         bcc     LFA28
         sta     SoftSwitch::RDCARDRAM
-        lda     (Pointer4),y
+        lda     (NextLinePtr),y
         sta     SoftSwitch::RDMAINRAM
 LFA22:  pha
         ldy     YRegisterStorage
         pla
         rts
-LFA28:  lda     (Pointer4),y
+LFA28:  lda     (NextLinePtr),y
         bra     LFA22
 
 SetLengthOfCurrentLine:
+;;; *CurrentLinePtr = A
         sty     YRegisterStorage
         ldy     #0
         bra     LFA36
 SetCharAtYInCurrentLine:
+;;; *(CurrentLinePtr + Y) = A
         sty     YRegisterStorage
 LFA36:  pha
         lda     CurrentLinePtr
@@ -6437,26 +6446,26 @@ LFA49:  pla
         ldy     YRegisterStorage
         rts
 
-SetLengthOfLineAtPointer4:
-;;;  stores A at *(Pointer4)
+SetLengthOfNextLine:
+;;; *(NextLinePtr) = A
         sty     YRegisterStorage
         ldy     #0
         bra     LFA5A
-;;;  stores A at *(Pointer4 + Y)
-SetCharAtYInLineAtPointer4:
+;;; *(NextLinePtr + Y) = A
+SetCharAtYInNextLine:
         sty     YRegisterStorage
 LFA5A:  pha
-        lda     Pointer4
+        lda     NextLinePtr
         lsr     a
         bcc     LFA6D
         sta     SoftSwitch::WRCARDRAM
         pla
-        sta     (Pointer4),y
+        sta     (NextLinePtr),y
         sta     SoftSwitch::WRMAINRAM
         ldy     YRegisterStorage
         rts
 LFA6D:  pla
-        sta     (Pointer4),y
+        sta     (NextLinePtr),y
         ldy     YRegisterStorage
         rts
 
@@ -6535,7 +6544,6 @@ OpenAppleKeyComboTable:
         .byte   '?'
         .byte   'Y'             ; Clear to end of line
         .byte   'y'
-
         .byte   'T'             ; Tab stops
         .byte   't'
         .byte   'X'             ; Clear line
@@ -6544,7 +6552,6 @@ OpenAppleKeyComboTable:
         .byte   'p'
         .byte   'V'             ; Volumes
         .byte   'v'
-
         .byte   'C'             ; Copy text
         .byte   'c'
 
@@ -6598,7 +6605,7 @@ OpenAppleKeyComboJumpTable:
 
 ;;; Table of other key commands and handlers
 EditingControlKeyTable:
-        .byte   8               ; count byte $FB21
+        .byte   8 ; count byte
         .byte   HICHAR(ControlChar::Tab)
         .byte   HICHAR(ControlChar::Return)
         .byte   HICHAR(ControlChar::UpArrow)
@@ -6619,7 +6626,7 @@ EditingControlKeyJumpTable:
         .addr   SearchForString
 
 MenuLengths:
-        .byte   6,3,4    ; number of items in each menu
+        .byte   6,3,4 ; number of items in each menu
 
 MenuXPositions:
         .byte   3,13,28
@@ -6688,7 +6695,7 @@ SearchText:
 CursorBlinkCounter:
         .addr   $0000
 CursorBlinkRate:
-        .byte   $05
+        .byte   5
 ; This value toggles between CurrentCursorChar and CharUnderCursor.
 DisplayedCharAtCursor:
         .byte   $00
@@ -6836,63 +6843,63 @@ FileTypeTable:
 MacroTable:
 
 ;;; Macro 1
-        .byte   $44 ; length byte
+        .byte   68 ; length byte
         highascii "\r EdIt! - by Bill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
         .byte   "EM"
 
 ;;; Macro 2
-        .byte   $0E ; length byte
+        .byte   14 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
         .byte   "EM"
 
 ;;; Macro 3
-        .byte   $00 ; length byte
+        .byte   0 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
         .byte   "EM"
 
 ;;; Macro 4
-        .byte   $00 ; length byte
+        .byte   0 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
         .byte   "EM"
 
 ;;; Macro 5
-        .byte   $00 ; length byte
+        .byte   0 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
         .byte   "EM"
 
 ;;; Macro 6
-        .byte   $00 ; length byte
+        .byte   0 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
         .byte   "EM"
 
 ;;; Macro 7
-        .byte   $00 ; length byte
+        .byte   0 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
         .byte   "EM"
 
 ;;; Macro 8
-        .byte   $00 ; length byte
+        .byte   0 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
         .byte   "EM"
 
 ;;; Macro 9
-        .byte   $00 ; length byte
+        .byte   0 ; length byte
         highascii "This is a testill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
@@ -7249,18 +7256,20 @@ SavedCurrentLinePtr:
 SavedCurrentLineNumber:
         .addr   $0000
 
-;;; Probably more scratch variables:
-ScratchVal8:
+;;; Scratch variables used in WordWrapUpToNextCR
+WordWrapScratchVal1:
         .byte   $00
-ScratchVal9:
+WordWrapScratchVal2:
         .byte   $00
-ScratchVal10:
+WordWrapScratchVal3:
         .byte   $00
 
         .byte   $00 ; unused
 
-ScratchVal11:
+;;; Scratch variable used in WordWrapUpToNextCR
+WordWrapScratchVal4:
         .byte   $00
+
 RAMDiskUnitNum:
         .byte   $00
 
@@ -7487,7 +7496,7 @@ TD500:  .byte   MT_REMAP(MouseText::RightVerticalBar)
         .byte   MT_REMAP(MouseText::Diamond)
         .byte   $00
 
-TD591:  .byte   $0C
+TD591:  .byte   12
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-? for Help"
 
@@ -7498,21 +7507,21 @@ TD5D0:  msb1pstring "Copy Text [T]o or [F]rom the clipboard?"
 TD5F8:  msb1pstring "Clipboard is empty."
 TD60C:  msb1pstring "Clipboard is full."
 
-TD61F:  .byte   $29
+TD61F:  .byte   41
         highascii "Enter text or use "
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-cmds; Esc for menus. "
 
 TD649:  msb1pstring "Line       Col.   "
 
-TD65C:  .byte   $36
+TD65C:  .byte   54
         highascii "Use arrows or mouse to select an option; then press "
         .byte   MT_REMAP(MouseText::Return)
         .byte   HICHAR('.')
 
 TD693:  msb1pstring "ESC to go back"
 
-TD6A2:  .byte   $4C
+TD6A2:  .byte   76
         highascii "Use "
         .byte   MT_REMAP(MouseText::LeftArrow)
         .byte   HICHAR(' ')
@@ -7521,13 +7530,13 @@ TD6A2:  .byte   $4C
         .byte   MT_REMAP(MouseText::Return)
         highascii "-accept.   Pos: "
 
-TD6EE:  .byte   $0E
+TD6EE:  .byte   14
         .byte   MT_REMAP(MouseText::Checkerboard2)
         .byte   MT_REMAP(MouseText::Checkerboard1)
         .byte   " Abort "
         highascii " Esc "
 
-TD6FD:  .byte   $0E
+TD6FD:  .byte   14
         .byte   MT_REMAP(MouseText::Checkerboard2)
         .byte   MT_REMAP(MouseText::Checkerboard1)
         .byte   " Accept "
@@ -7548,7 +7557,7 @@ TD761:  msb1pstring "E - Exit; no save"
 
 TD773:  msb1pstring " New Prefix "
 
-TD780:  .byte   $18
+TD780:  .byte   24
         highascii "Press "
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-S for Slot/Drive"
@@ -7559,11 +7568,11 @@ TD7A6:  msb1pstring " Save File "
 TD7B2:  msb1pstring "Path:"
 TD7B8:  msb1pstring "Prefix:/"
 
-TD7C1:  .byte   $12
+TD7C1:  .byte   18
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-N for New Prefix"
 
-TD7D4:  .byte   $20
+TD7D4:  .byte   32
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-L or click mouse to List Files"
 
@@ -7571,7 +7580,7 @@ TD7F5:  msb1pstring "WARNING: File in memory will be lost."
 TD81B:  msb1pstring "Press 'S' to save file in memory."
 TD83D:  pstring  " Select File "
 
-TD84B:  .byte   $20
+TD84B:  .byte   32
         highascii "Use "
         .byte   MT_REMAP(MouseText::UpArrow)
         .byte   HICHAR(' ')
@@ -7582,7 +7591,7 @@ TD84B:  .byte   $20
 
 TD86C:  msb1pstring "No files; press a key."
 
-TD883:  .byte   $23
+TD883:  .byte   35
         highascii "Use "
         .byte   MT_REMAP(MouseText::OpenApple)
         .byte   HICHAR('-')
@@ -7597,12 +7606,12 @@ TD8CB:  msb1pstring "Turn ON mouse?"
 TD8DA:  msb1pstring "Enter new rate (1-9):"
 TD8F0:  msb1pstring "Enter new line length (39-79):"
 
-TD90F:  .byte   $2A
+TD90F:  .byte   42
         highascii "You MUST clear file in memory ("
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-M) FIRST."
 
-TD93A:  .byte   $29
+TD93A:  .byte   41
         highascii "Use "
         .byte   MT_REMAP(MouseText::UpArrow)
         .byte   HICHAR(' ')
@@ -7612,7 +7621,7 @@ TD93A:  .byte   $29
         .byte   MT_REMAP(MouseText::Return)
         .byte   HICHAR('.')
 
-TD964:  .byte   $0F
+TD964:  .byte   15
         .byte   MT_REMAP(MouseText::Hourglass)
         highascii " Please Wait.."
 
@@ -7629,7 +7638,7 @@ TDA4D:  msb1pstring " Schenectady, NY 12308\r"
 TDA65:  msb1pstring "Replace old version of file (Y/N)?"
 TDA88:  msb1pstring " Load File "
 
-TDA94:  .byte   $15
+TDA94:  .byte   21
         highascii "Memory Full; Press "
         .byte   MT_REMAP(MouseText::Return)
         .byte   HICHAR('.')
@@ -7644,36 +7653,35 @@ TDB33:  msb1pstring "Printer NOT found!"
 TDB46:  msb1pstring "Enter left margin (0-9):"
 TDB5F:  msb1pstring "Enter # to edit; [S] to save to disk."
 
-TDB85:  .byte   $3F
-
+TDB85:  .byte   63
         highasciiz "Enter macro; "
         highasciiz "-DEL deletes left; "
         highasciiz "-Esc = abort; "
         highascii "-Rtn = accept."
 
-TDBC5:  .byte   $20
+TDBC5:  .byte   32
         highascii "Insert PROGRAM disk and press "
         .byte   MT_REMAP(MouseText::Return)
         .byte   HICHAR('.')
 
-TDBE6:  .byte   $18
+TDBE6:  .byte   24
         .byte   MT_REMAP(MouseText::Hourglass)
         highascii " Saving.. Please wait.."
 
-TDBFF:  .byte   $19
+TDBFF:  .byte   25
         .byte   MT_REMAP(MouseText::Hourglass)
         highascii " Loading.. Please wait.."
 
 TDC19:  msb1pstring " Directory "
 
-TDC25:  .byte   $03
+TDC25:  .byte   3
         .byte   MT_REMAP(MouseText::Folder1)
         .byte   MT_REMAP(MouseText::Folder2)
         .byte   HICHAR(' ')
 
 TDC29:  msb1pstring "Filename        Type  Size  Date Modified "
 
-TDC54:  .byte   $14
+TDC54:  .byte   20
         highascii " AuxType "
         .byte   MT_REMAP(MouseText::LeftVerticalBar)
         highascii "   Blocks:"
@@ -7683,7 +7691,7 @@ TDC71:  msb1pstring "  Used:"
 TDC79:  msb1pstring "  Free:"
 TDC81:  msb1pstring "Use <SPACE> to"
 
-TDC90:  .byte   $0B
+TDC90:  .byte   11
         highascii "continue"
         .byte   MT_REMAP(MouseText::Ellipsis)
         .byte   MT_REMAP(MouseText::Ellipsis)
@@ -7695,61 +7703,61 @@ TDCDD:  msb1pstring " File "
 TDCE4:  msb1pstring " Utilities "
 TDCF0:  msb1pstring " Options "
 
-TDCFA:  .byte   $14
+TDCFA:  .byte   20
         highascii " About Ed-It! "
         .byte   HICHAR(ControlChar::NormalVideo)
         .byte   HICHAR(' ')
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-A "
 
-TDD0F:  .byte   $14
+TDD0F:  .byte   20
         highascii " Load File..  "
         .byte   HICHAR(ControlChar::NormalVideo)
         .byte   HICHAR(' ')
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-L "
 
-TDD24:  .byte   $14
+TDD24:  .byte   20
         highascii " Save as..    "
         .byte   HICHAR(ControlChar::NormalVideo)
         repeatbyte HICHAR(' '), 5
 
-TDD39:  .byte   $14
+TDD39:  .byte   20
         highascii " Print..      "
         .byte   HICHAR(ControlChar::NormalVideo)
         .byte   HICHAR(' ')
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-P "
 
-TDD4E:  .byte   $14
+TDD4E:  .byte   20
         highascii " Clear Memory "
         .byte   HICHAR(ControlChar::NormalVideo)
         .byte   HICHAR(' ')
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-M "
 
-TDD63:  .byte   $14
+TDD63:  .byte   20
         highascii " Quit         "
         .byte   HICHAR(ControlChar::NormalVideo)
         .byte   HICHAR(' ')
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-Q "
 
-TDD78:  .byte   $12
+TDD78:  .byte   18
         highascii " Directory  "
         .byte   HICHAR(ControlChar::NormalVideo)
         .byte   HICHAR(' ')
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-D "
 
-TDD8B:  .byte   $12
+TDD8B:  .byte   18
         highascii " New Prefix "
         .byte   HICHAR(ControlChar::NormalVideo)
         .byte   HICHAR(' ')
         .byte   MT_REMAP(MouseText::OpenApple)
         highascii "-N "
 
-TDD9E:  .byte   $12
+TDD9E:  .byte   18
         highascii " Volumes    "
         .byte   HICHAR(ControlChar::NormalVideo)
         .byte   HICHAR(' ')
@@ -7828,13 +7836,13 @@ DoneEditingMacro:
 
 DisplayAllMacros:
         lda     #1
-L0352:  sta     MacroNumberBeingEdited
+@Loop:  sta     MacroNumberBeingEdited
         jsr     CopyCurrentMacroText
         jsr     DisplayCurrentMacroText
         lda     MacroNumberBeingEdited
         inc     a
-        cmp     #$0A
-        blt     L0352
+        cmp     #NumMacros+1
+        blt     @Loop
         rts
 
 CopyCurrentMacroText:
@@ -7843,14 +7851,14 @@ CopyCurrentMacroText:
         jsr     LoadMacroPointer
         lda     (MacroPtr)
         tay
-L036C:  lda     (MacroPtr),y
+@Loop:  lda     (MacroPtr),y
         sta     ProDOS::SysPathBuf,y
         dey
-        bpl     L036C
+        bpl     @Loop
         rts
 
 DisplayCurrentMacroText:
-L0375:  lda     MacroNumberBeingEdited
+        lda     MacroNumberBeingEdited
         asl     a
         inc     a
         tay
