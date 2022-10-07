@@ -40,6 +40,7 @@ DialogWidth          := $EB
 ScreenYCoord         := $EC
 ScreenXCoord         := $ED
 StringPtr            := $EE ; used for string output
+ReadLineCounter      := $F0
 
 ;;; also used: $E0 (written, but never read)
 
@@ -863,7 +864,7 @@ TitleScreenText:
         highascii "ALL RIGHTS RESERVED"
         .byte   HICHAR(ControlChar::Return)
         repeatbyte HICHAR(' '), 33
-        highascii "Sept. 89  v3.00"
+        highascii "Dec. 89   v3.01"
         .byte   HICHAR(ControlChar::Return)
         repeatbyte HICHAR('_'), 80
         .byte   $00
@@ -3262,6 +3263,7 @@ LE2E6:  jsr     PlayTone
         beq     LE308
         cmp     #HICHAR(ControlChar::Return)
         beq     LE30C
+        and     #ToUpperCaseANDMask
         cmp     #HICHAR('S')
         bne     LE2E6
         lda     PathnameBuffer ; already have a filename?
@@ -3323,25 +3325,33 @@ LE369:  lda     ProDOS::SysPathBuf,y
         jsr     DisplayLoadingOrSavingMessage
         jsr     ClearStatusLine
         stz     EditorReadWriteRequestCount+1
-        lda     #1 ; going to read file one byte at a time
+        lda     #16 ; going to read file 16 bytes at a time
         sta     EditorReadWriteRequestCount
-        lda     #<ProDOS::SysPathBuf
+        lda     #<MemoryMap::INBUF
         sta     EditorReadWriteBufferAddr
-        lda     #>ProDOS::SysPathBuf
+        lda     #>MemoryMap::INBUF
         sta     EditorReadWriteBufferAddr+1
         jsr     SetCurrentLinePointerToFirstLine ; start first line
         jsr     SetDocumentLineCountToCurrentLine
+        stz     ReadLineCounter
+        stz     EditorReadWriteTransferCount
 ReadNextLineFromFile:
         lda     #0
         jsr     SetLengthOfCurrentLine
 ProcessNextCharFromFile:
+        lda     EditorReadWriteTransferCount
+        bne     LE3AE
         lda     #ProDOS::CREAD
         ldx     #<EditorReadWriteParams
         ldy     #>EditorReadWriteParams
         jsr     MakeMLICall
         beq     LE3AC
         jmp     LE43D  ; handle error
-LE3AC:  lda     ProDOS::SysPathBuf
+LE3AC:  stz     ReadLineCounter
+LE3AE:  dec     EditorReadWriteTransferCount
+        ldx     ReadLineCounter
+        inc     ReadLineCounter
+        lda     MemoryMap::INBUF,x
         and     #%01111111
         cmp     #ControlChar::Return
         beq     LE427 ; need to end current "line" and start a new one
@@ -6847,63 +6857,39 @@ MacroTable:
         highascii "\r EdIt! - by Bill Tudor\r"
         highascii "   Copyright 1988-89\r"
         highascii "Northeast Micro Systems"
-        .byte   "EM"
+        .byte   $00,$00
 
 ;;; Macro 2
-        .byte   14 ; length byte
-        highascii "This is a testill Tudor\r"
-        highascii "   Copyright 1988-89\r"
-        highascii "Northeast Micro Systems"
-        .byte   "EM"
+        .byte   0 ; length byte
+        repeatbyte $00, MaxMacroLength
 
 ;;; Macro 3
         .byte   0 ; length byte
-        highascii "This is a testill Tudor\r"
-        highascii "   Copyright 1988-89\r"
-        highascii "Northeast Micro Systems"
-        .byte   "EM"
+        repeatbyte $00, MaxMacroLength
 
 ;;; Macro 4
         .byte   0 ; length byte
-        highascii "This is a testill Tudor\r"
-        highascii "   Copyright 1988-89\r"
-        highascii "Northeast Micro Systems"
-        .byte   "EM"
+        repeatbyte $00, MaxMacroLength
 
 ;;; Macro 5
         .byte   0 ; length byte
-        highascii "This is a testill Tudor\r"
-        highascii "   Copyright 1988-89\r"
-        highascii "Northeast Micro Systems"
-        .byte   "EM"
+        repeatbyte $00, MaxMacroLength
 
 ;;; Macro 6
         .byte   0 ; length byte
-        highascii "This is a testill Tudor\r"
-        highascii "   Copyright 1988-89\r"
-        highascii "Northeast Micro Systems"
-        .byte   "EM"
+        repeatbyte $00, MaxMacroLength
 
 ;;; Macro 7
         .byte   0 ; length byte
-        highascii "This is a testill Tudor\r"
-        highascii "   Copyright 1988-89\r"
-        highascii "Northeast Micro Systems"
-        .byte   "EM"
+        repeatbyte $00, MaxMacroLength
 
 ;;; Macro 8
         .byte   0 ; length byte
-        highascii "This is a testill Tudor\r"
-        highascii "   Copyright 1988-89\r"
-        highascii "Northeast Micro Systems"
-        .byte   "EM"
+        repeatbyte $00, MaxMacroLength
 
 ;;; Macro 9
         .byte   0 ; length byte
-        highascii "This is a testill Tudor\r"
-        highascii "   Copyright 1988-89\r"
-        highascii "Northeast Micro Systems"
-        .byte   "EM"
+        repeatbyte $00, MaxMacroLength
 
         .reloc
 
@@ -7125,6 +7111,7 @@ EditorReadWriteBufferAddr:
         .addr   $0000 ; data_buffer
 EditorReadWriteRequestCount:
         .word   $0000 ; request_count
+EditorReadWriteTransferCount:
         .word   $0000 ; transfer_count
 
 ;;; One-byte buffer containing only a carriage return. Used to write
@@ -7147,7 +7134,7 @@ EditorSetMarkParams:
         .byte   $02 ; param_count
 EditorSetMarkRefNum:
         .byte   $00 ; ref_num
-        .byte   $AE,$37,$00 ; position
+        .byte   $C3,$37,$00 ; position
 
 PathnameLength: ; copy of first byte of PathnameBuffer
         .byte   $00
@@ -7631,7 +7618,7 @@ TD99A:  msb1pstring " Ed-It! "
 TD9A3:  msb1pstring "Ed-It! - A Text File Editor\r\r"
 TD9C1:  msb1pstring "by Bill Tudor\r\r"
 TD9D1:  msb1pstring "Northeast Micro Systems\r"
-TD9EA:  msb1pstring "  v3.00    Sept. 1989\r\r"
+TD9EA:  msb1pstring "  v3.01     Dec. 1989\r\r"
 TDA02:  msb1pstring "Copyright 1988-89               All Rights Reserved"
 TDA36:  msb1pstring "  1220 Gerling Street\r"
 TDA4D:  msb1pstring " Schenectady, NY 12308\r"
