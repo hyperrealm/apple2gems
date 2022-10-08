@@ -20,30 +20,30 @@
 ;;; Versions 3.01 through 3.04 were bugfix releases and were shipped
 ;;; with successive releases of "Talk Is Cheap".
 
-.MACPACK generic
-.FEATURE string_escapes
+        .MACPACK generic
+        .FEATURE string_escapes
 
-.setcpu "65C02"
+        .setcpu "65C02"
 
-.include "Columns80.s"
-.include "ControlChars.s"
-.include "FileTypes.s"
-.include "Macros.s"
-.include "MemoryMap.s"
-.include "Monitor.s"
-.include "Mouse.s"
-.include "MouseText.s"
-.include "OpCodes.s"
-.include "ProDOS.s"
-.include "SmartPort.s"
-.include "SoftSwitches.s"
-.include "Vectors.s"
-.include "ZeroPage.s"
+        .include "Columns80.s"
+        .include "ControlChars.s"
+        .include "FileTypes.s"
+        .include "Macros.s"
+        .include "MemoryMap.s"
+        .include "Monitor.s"
+        .include "Mouse.s"
+        .include "MouseText.s"
+        .include "OpCodes.s"
+        .include "ProDOS.s"
+        .include "SmartPort.s"
+        .include "SoftSwitches.s"
+        .include "Vectors.s"
+        .include "ZeroPage.s"
 
 ;;; Macros.
 
 ;;; Macro to remap MouseText character to control char range ($00-$1F)
-.define MT_REMAP(c) c - $40
+        .define MT_REMAP(c) c - $40
 
 ;;; Zero Page Locations.
 
@@ -92,11 +92,13 @@ PrinterInitStringMaxLength := 20
 
 LastClipboardPointer := DataBuffer+DataBufferLength-ColumnCount
 
-.linecont +
+        .linecont +
+
 MacroTableOffsetInExecutable := \
         (MainEditor_Code_End - (NumMacros * (MaxMacroLength + 1)) \
          - ProDOS::SysLoadAddress)
-.linecont -
+
+        .linecont -
 
 ;;; Bitmasks.
 
@@ -354,7 +356,7 @@ L2234:  jsr     ProDOS::MLI
         cmp     #$80 ; /RAM has 128 blocks
         bge     L21F4
         ldy     #$25
-        lda     BlockBuffer,y   ; file_count == 0?
+        lda     BlockBuffer,y ; file_count == 0?
         ora     BlockBuffer+1,y
         beq     DisconnectRAMDisk ; yes - /RAM is empty
         ldy     #0
@@ -364,7 +366,7 @@ L2257:  lda     TextRemoveRamDiskPrompt,y
         iny
         bne     L2257
 L2262:  lda     BlockBuffer+4
-        and     #%00001111      ; volume name length
+        and     #%00001111 ; volume name length
         tax
         ldy     #0
 L226A:  lda     BlockBuffer+5,y ; output volume name
@@ -643,7 +645,7 @@ L24AF:  lda     ProDOS::MACHID
         bcs     L24B6 ; Branch if clock/calendar card present
         iny
 L24B6:  sty     $E0 ; meant to be clock/calendar flag? never read
-;;; Search for mouse slot
+;;; Search for mouse slot.
         lda     #8
         sta     MouseSlot
 L24BC:  dec     MouseSlot
@@ -665,8 +667,8 @@ L24D9:  sta     SoftSwitch::KBDSTRB
         .byte   ProDOS::CALLOCINT
         .addr   AllocInterruptParams
         lda     InterruptNum
-        sta     EditorDeallocIntParams+1
-;;; Set reset vector
+        sta     EditorInterruptNum
+;;; Set reset vector.
         lda     #<ResetHandler
         sta     Vector::SOFTEV
         lda     #>ResetHandler
@@ -680,7 +682,7 @@ L24EB:  sty     SoftSwitch::SETSTDZP
         sta     $00,y
         dey
         bne     L24EB
-;;; Set up mouse firmware entry points
+;;; Set up mouse firmware entry points.
         lda     SoftSwitch::RWLCRAMB1
         lda     SoftSwitch::RWLCRAMB1
         lda     MouseSlot
@@ -1479,45 +1481,45 @@ LD435:  pla     ; should this label have been on previous instruction?
 DeleteChar:
         stz     DocumentUnchangedFlag
         lda     CurrentCursorXPos
-        beq     LD4B1
+        beq     LD4B1 ; branch if at beginning of line
 LD441:  jsr     IsCursorAtEndOfLine
-        bcs     LD465
+        bcs     LD465 ; branch if not at end of line
         jsr     GetLengthOfCurrentLine
         and     #MSBOffANDMask
-        sta     CurrentCursorXPos
-        beq     LD477
+        sta     CurrentCursorXPos ; move cursor to end of line
+        beq     LD477 ; branch if line is empty
         jsr     GetLengthOfCurrentLine
-        bpl     LD465
+        bpl     LD465  ; branch if no CR
         and     #MSBOffANDMask
-        jsr     SetLengthOfCurrentLine
+        jsr     SetLengthOfCurrentLine ; remove CR from end of line
 LD45A:  jsr     WordWrapUpToNextCR
         beq     LD462
-        jmp     MainEditorRedrawDocument
-LD462:  jmp     MainEditorRedrawCurrentLine
+        jmp     MainEditorRedrawDocument ; redraw entire document
+LD462:  jmp     MainEditorRedrawCurrentLine ; redraw just this line
 LD465:  dec     CurrentCursorXPos
         ldy     CurrentCursorXPos
         iny
         cpy     DocumentLineLength
         bge     LD474
-        jsr     RemoveCharAtYOnCurrentLine
+        jsr     RemoveCharAtYOnCurrentLine ; remove deleted char
 LD474:  jsr     GetLengthOfCurrentLine
-LD477:  beq     LD4EC
+LD477:  beq     LD4EC ; branch if line is now empty
         and     #MSBOffANDMask
-        sta     ScratchVal4
-        ldy     #0
+        sta     ScratchVal4  ; save current line length
+        ldy     #0 ; search forward in line for space
 LD480:  iny
         jsr     GetCharAtYInCurrentLine
         cmp     #' '
-        beq     LD48E
+        beq     LD48E ; branch if space found
         iny
         cpy     ScratchVal4
         blt     LD480
-LD48E:  sty     ScratchVal4
+LD48E:  sty     ScratchVal4 ; check if word will fit on previous line
         jsr     GetSpaceLeftOnPreviousLine
         cmp     ScratchVal4
-        blt     LD45A
-        beq     LD45A
-        sta     ScratchVal6
+        blt     LD45A ; will not fit; re-wrap text
+        beq     LD45A ; will not fit; re-wrap text
+        sta     ScratchVal6 ; space left on previous line
         lda     DocumentLineLength
         sec
         sbc     ScratchVal6
@@ -1525,16 +1527,16 @@ LD48E:  sty     ScratchVal4
         adc     CurrentCursorXPos
         sta     CurrentCursorXPos
         jsr     MoveToPreviousDocumentLine
-        bra     LD45A
+        bra     LD45A ; re-wrap text
 LD4B1:  jsr     IsOnFirstDocumentLine
-        beq     LD532
+        beq     LD532 ; branch if no previous line
         jsr     GetLengthOfCurrentLine
         pha
         and     #MSBOffANDMask
-        bne     LD4DE           ; anything to delete on this line?
+        bne     LD4DE ; anything to delete on this line?
         jsr     IsOnLastDocumentLine
-        beq     LD4C6
-        jsr     ShiftLinePointersUpForDelete
+        beq     LD4C6 ; branch if no following line
+        jsr     ShiftLinePointersUpForDelete ; delete empty line
 LD4C6:  jsr     DecrementDocumentLineCount
         pla
         bpl     LD4DE
@@ -1544,23 +1546,23 @@ LD4C6:  jsr     DecrementDocumentLineCount
         sta     CurrentCursorXPos
         ora     #MSBOnORMask
         jsr     SetLengthOfCurrentLine
-        bra     LD512           ; done
+        bra     LD512 ; done
 LD4DE:  jsr     MoveToPreviousDocumentLine
-        jsr     GetLengthOfCurrentLine
-        sta     CurrentCursorXPos
-        beq     LD4EC
+        jsr     GetLengthOfCurrentLine ; move cursor to end
+        sta     CurrentCursorXPos      ; of previous line
+        beq     LD4EC                  ; branch if line empty
         jmp     LD441
 LD4EC:  jsr     IsOnLastDocumentLine
-        beq     LD4F4
-        jsr     ShiftLinePointersUpForDelete
+        beq     LD4F4 ; branch if on last line
+        jsr     ShiftLinePointersUpForDelete ; delete empty line
 LD4F4:  jsr     DecrementDocumentLineCount
         lda     DocumentLineCount
         ora     DocumentLineCount ; bug? should be DocumentLineCount+1 ?
-        bne     LD515
+        bne     LD515 ; branch if document not empty
         jsr     SetDocumentLineCountToCurrentLine
 LD502:  jsr     GetLengthOfCurrentLine
         and     #MSBOffANDMask
-        sta     CurrentCursorXPos
+        sta     CurrentCursorXPos ; move cursor to end of line
         jmp     MainEditorRedrawDocument
 
 ;;; Two Unreachable instructions:
@@ -3696,7 +3698,7 @@ LE69B:  jsr     PlayTone
         ldy     ProDOS::SysPathBuf
         beq     LE69B
 LE6A9:  ldy     ProDOS::SysPathBuf
-        cpy     DialogWidth     ; path full?
+        cpy     DialogWidth ; path full?
         beq     LE69B
         iny
         sta     ProDOS::SysPathBuf,y ; append char
@@ -3725,8 +3727,8 @@ LE6D1:  tay
 LE6DA:  sec
         rts
 
+;;; Key commands available in path editing dialog.
 PathEditingOpenAppleKeyCombos:
-;;;  Key commands available in path editing dialog.
         .byte   'N' ; OA-N
         .byte   'n' ; OA-n
         .byte   'L' ; OA-L
@@ -3734,7 +3736,7 @@ PathEditingOpenAppleKeyCombos:
         .byte   'S' ; OA-S
         .byte   's' ; OA-s
         .byte   ControlChar::Return ; OA-Return
-        .byte   HICHAR(ControlChar::Esc)
+        .byte   HICHAR(ControlChar::Esc) ; Esc
 
 ;;; Blanks out lines 17-20, from column 16 to 66, then displays string at
 ;;; AX, on line 18. Only used for "Loading..." and "Saving..." messages.
@@ -5755,7 +5757,7 @@ ConvertNextDecimalDigit:
         ldx     #16 ; 16 bits to process
         lda     #0
         sta     ScratchVal6
-LF598:  jsr     LF5B0
+LF598:  jsr     ShiftWordLeft
         rol     ScratchVal6
         sec
         lda     ScratchVal6
@@ -5766,8 +5768,8 @@ LF598:  jsr     LF5B0
 LF5AC:  dex
         bne     LF598
         rts
-;;; shift word left
-LF5B0:  asl     ScratchVal4
+ShiftWordLeft:
+        asl     ScratchVal4
         rol     ScratchVal5
         rts
 
@@ -6707,7 +6709,7 @@ PrinterSlot:
         .byte   1
 
 PrinterInitStringRawBytes:
-        repeatbyte $00, 20
+        repeatbyte $00, PrinterInitStringMaxLength
 
 PrinterInitString:
         msb1pstring "^I80N"
@@ -7017,6 +7019,7 @@ InterruptHandler:
 
 EditorDeallocIntParams:
         .byte   $01
+EditorInterruptNum:
         .byte   $00
 
 ;;; Makes a MLI call; call # in A, param list address in X (lo), Y (hi).
@@ -7241,15 +7244,15 @@ RAMDiskUnitNum:
 CallSetMouse:
          jmp    $0000
 CallInitMouse:
-         sta    SoftSwitch::SETSTDZP
+         sta    SoftSwitch::SETSTDZP ; select main ZP & stack
          pha
-         lda    SoftSwitch::RDROMLCB1
-        pla
+         lda    SoftSwitch::RDROMLCB1 ; select ROM
+         pla
 InitMouseEntry := *+1
          jsr    $0000
-         sta    SoftSwitch::SETALTZP
+         sta    SoftSwitch::SETALTZP ; select aux ZP & stack
          pha
-         lda    SoftSwitch::RWLCRAMB1
+         lda    SoftSwitch::RWLCRAMB1 ; select aux LC RAM
          lda    SoftSwitch::RWLCRAMB1
          pla
          rts
@@ -7464,10 +7467,12 @@ TextHelpText:
         repeatbyte HICHAR('_'), 37
         .byte   MT_REMAP(MouseText::LeftVerticalBar)
         .byte   HICHAR(ControlChar::Return)
+;;; Line 18
         repeatbyte HICHAR(' '), 17
         .byte   MT_REMAP(MouseText::Diamond)
         highascii " Copyright 1988-93  Northeast Micro Systems "
         .byte   MT_REMAP(MouseText::Diamond)
+
         .byte   $00
 
 TextHelpKeyCombo:
@@ -7891,37 +7896,41 @@ EditMacro:
         lda     #<TextMacroEditingInstructions
         ldx     #>TextMacroEditingInstructions
         jsr     DisplayStringInStatusLine
-L030F:  jsr     DisplayCurrentMacroText
-L0312:  jsr     GetKeypress
+@RedisplayMacro:
+        jsr     DisplayCurrentMacroText
+@GetMacroKeypress:
+        jsr     GetKeypress
         bit     SoftSwitch::RDBTN1 ; test Solid Apple key
-        bmi     L0338              ; branch if it's down
+        bmi     @OpenAppleDown ; branch if it's down
         ldx     ProDOS::SysPathBuf
         cpx     #MaxMacroLength
-        bge     L0333
+        bge     @InvalidKeypress
         inx
         sta     ProDOS::SysPathBuf,x
         stx     ProDOS::SysPathBuf
-        bra     L030F
-;;; Delete character
-L032A:  lda     ProDOS::SysPathBuf
-        beq     L0333
+        bra     @RedisplayMacro
+@DeleteChar:
+        lda     ProDOS::SysPathBuf
+        beq     @InvalidKeypress
         dec     a
         sta     ProDOS::SysPathBuf
-        bra     L030F
-L0333:  jsr     PlayTone ; invalid editing key
-        bra     L0312
-L0338:  cmp     #ControlChar::Delete
-        beq     L032A
+        bra     @RedisplayMacro
+@InvalidKeypress:
+        jsr     PlayTone ; invalid editing key
+        bra     @GetMacroKeypress
+@OpenAppleDown:
+        cmp     #ControlChar::Delete
+        beq     @DeleteChar
         cmp     #ControlChar::Esc
-        beq     DoneEditingMacro
+        beq     @DoneEditingMacro
         cmp     #ControlChar::Return
-        bne     L0333
+        bne     @InvalidKeypress
         ldy     ProDOS::SysPathBuf
-L0347:  lda     ProDOS::SysPathBuf,y
+@Loop:  lda     ProDOS::SysPathBuf,y
         sta     (MacroPtr),y
         dey
-        bpl     L0347
-DoneEditingMacro:
+        bpl     @Loop
+@DoneEditingMacro:
         rts
 
 DisplayAllMacros:
@@ -7960,12 +7969,12 @@ DisplayCurrentMacroText:
         lda     #HICHAR(':')
         jsr     OutputCharAndAdvanceScreenPos
         ldy     ProDOS::SysPathBuf
-        beq     L03D0
+        beq     @EraseRestOfLine
         sty     L03E3
         ldx     #0
-L0397:  inx
+@Loop:  inx
         lda     ProDOS::SysPathBuf,x
-        bmi     L03B7
+        bmi     @NotOpenAppleCombo
         phy
         phx
         pha
@@ -7981,19 +7990,22 @@ L0397:  inx
         pla
         plx
         ply
-L03B7:  ora     #MSBOnORMask
+@NotOpenAppleCombo:
+        ora     #MSBOnORMask
         cmp     #HICHAR(' ')
-        bge     L03C5
+        bge     @NotControlChar
         pha     ; display control chars in inverse
         jsr     SetMaskForInverseText
         pla
         clc
         adc     #$40 ; remap control char to uppercase char
-L03C5:  jsr     OutputCharAndAdvanceScreenPos
+@NotControlChar:
+        jsr     OutputCharAndAdvanceScreenPos
         jsr     SetMaskForNormalText
         cpx     ProDOS::SysPathBuf
-        blt     L0397
-L03D0:  jsr     ClearToEndOfLine
+        blt     @Loop
+@EraseRestOfLine:
+        jsr     ClearToEndOfLine
         lda     ZeroPage::CV
         inc     a
         jsr     ComputeTextOutputPos
