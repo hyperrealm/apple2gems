@@ -15,4 +15,4 @@ EDIT$(EXT): EdIt.o
 listing: EdIt.list.pdf
 
 clean:
-	rm -f *.o *.list *$(INIT_EXT) *$(SYS_EXT) *.list.pdf
+	rm -f *.o *.list *.list.pdf
