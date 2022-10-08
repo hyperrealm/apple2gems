@@ -14,5 +14,6 @@ SLOT4ROM   := $C400
 SLOT5ROM   := $C500
 SLOT6ROM   := $C600
 SLOT7ROM   := $C700
+LCRAM      := $D000
 
 .endscope
