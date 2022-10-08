@@ -1,3 +1,24 @@
+;;;                   Ed-It! - A Text File Editor
+
+;;; This is a disassembly of Ed-It!, a text file editor for the Apple II
+;;; written by Bill Tudor. Ed-It! runs on ProDOS and requires a 65C02
+;;; processor, MouseText, and at least 128K of RAM. It is compatible with
+;;; the Enhanced IIe, IIc, IIc Plus, and IIGS.
+;;;
+;;; This is version 3.04 of Ed-It!, which is the latest version that I
+;;; have been able to find. It was released in July 1993. Given that
+;;; release date, it is highly likely that this is the final version.
+;;;
+;;; Version 2.90 was released on SoftDisk issue #94 in 1989.
+;;;
+;;; Version 3.00 was distributed as part of "Talk Is Cheap", a dialup
+;;; communications package for the Apple II. This version added macro
+;;; support, a "set line length" menu option, and clipboard copy/paste
+;;; functionality.
+;;;
+;;; Versions 3.01 through 3.04 were bugfix releases and were shipped
+;;; with successive releases of "Talk Is Cheap".
+
 .MACPACK generic
 .FEATURE string_escapes
 
@@ -44,7 +65,7 @@ ReadLineCounter      := $F0
 
 ;;; also used: $E0 (written, but never read)
 
-DataBuffer         := $B800 ; 1K I/O buffer used for ON_LINE, clipboard, etc.
+DataBuffer         := $B800 ; 1K buffer used for ON_LINE, clipboard, etc.
 DataBufferLength   :=  $400
 BlockBuffer        := $1000 ; 512-byte buffer for reading a disk block
 BackingStoreBuffer := $0800 ; Buffer in aux-mem to store text behind menus
@@ -188,8 +209,7 @@ L2133:  lda     Page3_Code_Start,y ; Copy 256 bytes from $6C2E to $0300
         sta     $0300,y
         dey
         bne     L2133
-;;; Turn on AUX LC RAM bank 1, and copy code at $2ABC-$5A2C to it @ $D000.
-;;; (abc - 3a2c in file, bytes 2748-14892, 12145 bytes)
+;;; Copy the editor's resident code to the auxiliary RAM language card.
         sei
         sta     SoftSwitch::SETALTZP
         lda     SoftSwitch::WRLCRAMB1
@@ -221,8 +241,8 @@ L2174:  inc     ZeroPage::A4L
         bne     L215E
         inc     ZeroPage::A4H
         bra     L215E
-;;; Turn on AUX LC RAM bank 2, and copy $1000 bytes of data from $5D09
-;;; to it at $D000.
+;;; Copy text data to $D000-$DFFF bank 2 of the auxiliary RAM language
+;;; card.
 L217C:  sta     SoftSwitch::SETALTZP
         lda     SoftSwitch::WRLCRAMB2
         lda     SoftSwitch::WRLCRAMB2
@@ -524,15 +544,15 @@ CloseConfigFile:
         bge     AfterPrinterConfigRead ; >= 8 - invalid
         sta     PrinterSlot ; save printer slot #
         ldy     #20
-L2411:  lda     MemoryMap::INBUF+$C9,y ; read printer init string
+L2411:  lda     MemoryMap::INBUF+$8A,y ; read printer init string
         sta     PrinterInitStringRawBytes,y ; from last 20 bytes of file
         dey
         bpl     L2411
         ldy     #1
         ldx     #1
-L241E:  lda     MemoryMap::INBUF+$C9,y ; create human readable version of
+L241E:  lda     MemoryMap::INBUF+$8A,y ; create human readable version of
         cmp     #' '                   ; printer init string by encoding
-        bge     L2430                  ; control characters as ^ + printable
+        bge     L2430                  ; control chars as '^' + printable
         pha                            ; character
         lda     #HICHAR('^')
         sta     PrinterInitString,x
@@ -542,7 +562,7 @@ L241E:  lda     MemoryMap::INBUF+$C9,y ; create human readable version of
         adc     #$40 ; convert control char to uppercase high ascii letter
 L2430:  ora     #%10000000
         sta     PrinterInitString,x
-        cpy     MemoryMap::INBUF+$C9
+        cpy     MemoryMap::INBUF+$8A
         beq     L2440
         iny
         inx
@@ -622,8 +642,13 @@ L24CC:  ldy     MouseSignatureByteOffsets,x
         bne     L24BC
         dex
         bpl     L24CC
-;;; Set reset vector
 L24D9:  sta     SoftSwitch::KBDSTRB
+        jsr     ProDOS::MLI
+        .byte   ProDOS::CALLOCINT
+        .addr   AllocInterruptParams
+        lda     InterruptNum
+        sta     EditorDeallocIntParams+1
+;;; Set reset vector
         lda     #<ResetHandler
         sta     Vector::SOFTEV
         lda     #>ResetHandler
@@ -645,7 +670,7 @@ L24EB:  sty     SoftSwitch::SETSTDZP
         ora     #%11000000
         sta     Pointer+1
         sta     CallSetMouse+2
-        sta     CallInitMouse+2
+        sta     InitMouseEntry+1
         sta     CallReadMouse+2
         sta     CallPosMouse+2
         stz     Pointer
@@ -660,7 +685,7 @@ L24EB:  sty     SoftSwitch::SETSTDZP
         sta     CallPosMouse+1
         ldy     #MouseCall::InitMouse
         lda     (Pointer),y
-        sta     CallInitMouse+1
+        sta     InitMouseEntry
 
 LinePointerTable           := $0800
 LineCountForMainMem        := $0213 ; (531 lines)
@@ -735,8 +760,8 @@ StartWithEmptyDocument:
         jmp     MainEditorStart
 
 ;;; This creates a pointer table, starting at (Pointer), of length
-;;; LinePointerCount. The first pointer's value is LinePointer and
-;;; each subsequent pointer is 80 + the previous pointer.
+;;; LinePointerCount. The first pointer's value is LinePointer and each
+;;; subsequent pointer is 80 + the previous pointer.
 GenerateLinePointerTable:
         ldy     #0
         lda     LinePointer
@@ -796,75 +821,15 @@ TitleScreenText:
         highascii "by Bill Tudor"
         .byte   HICHAR(ControlChar::Return)
         repeatbyte HICHAR(' '), 28
-        repeatbyte HICHAR('_'), 25
-        .byte   HICHAR(ControlChar::Return)
-        repeatbyte HICHAR(' '), 27
-        .byte   ControlChar::InverseVideo
-        .byte   ControlChar::MouseTextOn
-        .byte   HICHAR('Z')
-        .byte   ControlChar::NormalVideo
-        .byte   ControlChar::MouseTextOff
-        highascii " Northeast Micro Systems "
-        .byte   ControlChar::InverseVideo
-        .byte   ControlChar::MouseTextOn
-        .byte   HICHAR('_')
-        .byte   ControlChar::NormalVideo
-        .byte   ControlChar::MouseTextOff
-        .byte   HICHAR(ControlChar::Return)
-        repeatbyte HICHAR(' '), 27
-        .byte   ControlChar::InverseVideo
-        .byte   ControlChar::MouseTextOn
-        .byte   HICHAR('Z')
-        .byte   ControlChar::NormalVideo
-        .byte   ControlChar::MouseTextOff
-        highascii "   1220 Gerling Street   "
-        .byte   ControlChar::InverseVideo
-        .byte   ControlChar::MouseTextOn
-        .byte   HICHAR('_')
-        .byte   ControlChar::NormalVideo
-        .byte   ControlChar::MouseTextOff
-        .byte   HICHAR(ControlChar::Return)
-        repeatbyte HICHAR(' '), 27
-        .byte   ControlChar::InverseVideo
-        .byte   ControlChar::MouseTextOn
-        .byte   HICHAR('Z')
-        .byte   ControlChar::NormalVideo
-        .byte   ControlChar::MouseTextOff
-        highascii "  Schenectady, NY 12308  "
-        .byte   ControlChar::InverseVideo
-        .byte   ControlChar::MouseTextOn
-        .byte   HICHAR('_')
-        .byte   ControlChar::NormalVideo
-        .byte   ControlChar::MouseTextOff
-        .byte   HICHAR(ControlChar::Return)
-        repeatbyte HICHAR(' '), 27
-        .byte   ControlChar::InverseVideo
-        .byte   ControlChar::MouseTextOn
-        .byte   HICHAR('Z')
-        .byte   ControlChar::NormalVideo
-        .byte   ControlChar::MouseTextOff
-        highascii "   Tel. (518) 370-3976   "
-        .byte   ControlChar::InverseVideo
-        .byte   ControlChar::MouseTextOn
-        .byte   HICHAR('_')
-        .byte   ControlChar::NormalVideo
-        .byte   ControlChar::MouseTextOff
-        .byte   HICHAR(ControlChar::Return)
-        repeatbyte HICHAR(' '), 28
-        .byte   ControlChar::InverseVideo
-        .byte   ControlChar::MouseTextOn
-        repeatbyte HICHAR('L'), 25
-        .byte   ControlChar::NormalVideo
-        .byte   ControlChar::MouseTextOff
         .byte   HICHAR(ControlChar::Return)
         repeatbyte HICHAR(' '), 32
-        highascii "Copyright 1988-89"
+        highascii "Copyright 1988-93"
         .byte   HICHAR(ControlChar::Return)
         repeatbyte HICHAR(' '), 31
         highascii "ALL RIGHTS RESERVED"
         .byte   HICHAR(ControlChar::Return)
-        repeatbyte HICHAR(' '), 33
-        highascii "Dec. 89   v3.01"
+        repeatbyte HICHAR(' '), 32
+        highascii "July 1993  v3.04"
         .byte   HICHAR(ControlChar::Return)
         repeatbyte HICHAR('_'), 80
         .byte   $00
@@ -903,6 +868,12 @@ TicEditorFilename:
         .asciiz "TIC.EDITOR"
 
         repeatbyte $00, 64 ; unused 64-byte buffer
+
+AllocInterruptParams:
+        .byte   $02
+InterruptNum:
+        .byte   $00
+        .addr   InterruptHandler
 
 GetSetPrefixParams:
         .byte   $01
@@ -1728,9 +1699,9 @@ LD645:  lda     CurrentLineNumber+1
         sta     CurrentCursorYPos
 LD667:  jmp     MainEditor
 
-;;; Copy text to/from clipboard. Clipboard is stored in DataBuffer ($B800),
+;;; Copy text to/from clipboard. Clipboard is stored in DataBuffer ($B800)
 ;;; which is 1K in size. The first byte of the buffer is the number of
-;;; lines stored in the clipboard; the next two bytes are FF,FF if the
+;;; lines stored in the clipboard; the next two bytes are $FF, $FF if the
 ;;; clipboard is not empty.
 CopyToOrFromClipboard:
         lda     #<TD5D0 ; "Copy to or from..."
@@ -1988,6 +1959,7 @@ ShowHelpScreen:
         jsr     ClearTextWindow
         jsr     DisplayHelpText
         jsr     WaitForSpaceToContinueInStatusLine
+        jsr     ClearTextWindow
         jmp     MainEditor
 
 SearchForString:
@@ -2370,7 +2342,7 @@ LDB4E:  jmp     CleanUpAfterMenuSelection
 
 ShowAboutDialog:
         jsr     DrawDialogBox
-        .byte   14 ; height
+        .byte   10 ; height
         .byte   60 ; width
         .byte   6  ; x-coord
         .byte   10 ; y-coord
@@ -2399,21 +2371,6 @@ ShowAboutDialog:
         jsr     SetCursorPosToXY
         lda     #<TD9C1 ; about box text
         ldx     #>TD9C1
-        jsr     DisplayMSB1String
-        lda     #29
-        sta     Columns80::OURCH
-        lda     #<TD9D1 ; about box text
-        ldx     #>TD9D1
-        jsr     DisplayMSB1String
-        lda     #29
-        sta     Columns80::OURCH
-        lda     #<TDA36 ; about box text
-        ldx     #>TDA36
-        jsr     DisplayMSB1String
-        lda     #29
-        sta     Columns80::OURCH
-        lda     #<TDA4D ; about box text
-        ldx     #>TDA4D
         jsr     DisplayMSB1String
         lda     #29
         sta     Columns80::OURCH
@@ -3407,7 +3364,9 @@ LE3FC:  iny     ; move word into next line
 LE411:  txa
         tay
         jsr     SetLengthOfNextLine
-        lda     ProDOS::SysPathBuf
+        ldx     ReadLineCounter
+        dex
+        lda     MemoryMap::INBUF,x
         and     #%01111111
         jsr     SetCharAtYInNextLine
         jsr     SetCurrentLinePointerToNextLine
@@ -3669,10 +3628,9 @@ CloseFile:
         jsr     MakeMLICall
         rts
 
-;;; path editor (for load, save as, set prefix)
-;;; drawn at X,Y, width A. Returns in A the keypress
-;;; that ended the input, and Carry set if it wasn't
-;;; the Return key.
+;;; Path editor (for load, save as, set prefix), drawn at X,Y, width A.
+;;; Returns in A the keypress that ended the input, and Carry set if it
+;;; wasn't the Return key.
 EditPath:
         stx     ScreenXCoord
         sty     ScreenYCoord
@@ -3758,9 +3716,8 @@ PathEditingOpenAppleKeyCombos:
         .byte   ControlChar::Return ; OA-Return
         .byte   HICHAR(ControlChar::Esc)
 
-;;; blanks out lines 17-20, from column 16 to 66, then
-;;; displays string at AX, on line 18. Only used for
-;;;  "Loading..." and "Saving..." messages.
+;;; Blanks out lines 17-20, from column 16 to 66, then displays string at
+;;; AX, on line 18. Only used for "Loading..." and "Saving..." messages.
 DisplayLoadingOrSavingMessage:
         pha
         phx
@@ -3883,10 +3840,9 @@ DisplayProDOSErrorAndWaitForKeypress:
         jsr     GetKeypress
         rts
 
-;;; Document line buffers are used to store the formatted
-;;; directory entries. Directory entries are displayed in
-;;; a scrollable list that occupies 8 screen rows from row
-;;; 13 to 20.
+;;; Document line buffers are used to store the formatted directory
+;;; entries. Directory entries are displayed in a scrollable list that
+;;; occupies 8 screen rows from row 13 to 20.
 ShowDirectoryListingDialog:
         lda     #HICHAR(ControlChar::Return)
         sta     CursorMovementControlChars+4
@@ -4115,9 +4071,8 @@ OpenDirectoryFail:
         sec
         rts
 
-;;; 13 directory entries per block * 39 bytes per entry
-;;; is 507 bytes; 5 bytes of padding to complete a
-;;; 512 byte block
+;;; 13 directory entries per block * 39 bytes per entry is 507 bytes;
+;;; 5 bytes of padding to complete a 512 byte block.
 SkipPaddingBytesInDirectoryBlock:
         lda     #5
         bra     LE9DB
@@ -4249,12 +4204,11 @@ WaitForReturnOrEscKey:
         clc
 @Out:   rts
 
-;;;  Wait for a special key (from SpecialKeyTable, any key in first X entries), or Esc.
-;;;  Return with carry clear if that key was pressed, carry set
-;;;  if Esc was pressed.
-;;;  Returns 0 if none of the special keys were pressed, otherwise returns 1+ the offset
-;;;  in SpecialKeyTable of the key that was pressed.
-
+;;; Wait for a special key (from SpecialKeyTable, any key in first X
+;;; entries), or Esc. Return with carry clear if that key was pressed,
+;;; carry set if Esc was pressed. Returns 0 if none of the special keys
+;;; were pressed, otherwise returns 1+ the offset in SpecialKeyTable of
+;;; the key that was pressed.
 GetSpecificKeypress:
         phx
         jsr     GetKeypress
@@ -4390,7 +4344,7 @@ ClearTextWindow_SavedCV:
 ClearTextWindow_SavedCH:
         .byte   $00 ; saved OURCH
 
-;;; clears to end of line, without moving cursor pos
+;;; Clears to end of line, without changing the cursor position.
 ClearToEndOfLine:
         lda     #LastColumn
         sec
@@ -4511,9 +4465,8 @@ OutputRowOfChars:
         bne     OutputRowOfChars
         rts
 
-;;; Returns character entered in A. It will have the MSB
-;;; set unless Open-Apple was down, in which case the MSB
-;;; will be clear.
+;;; Returns character entered in A. It will have the MSB set unless
+;;; Open-Apple was down, in which case the MSB will be clear.
 GetKeypress:
         lda     MacroRemainingLength
         beq     ReadKeyboardAndMouse
@@ -4527,8 +4480,7 @@ LEC89:  dec     MacroRemainingLength
         ldx     #0 ; no KeyModReg when replaying macro
         pla
         rts
-;;; Keyboard & mouse input, blinking cursor
-;;; Returns KeyModReg in X
+;;; Keyboard & mouse input, and blinking cursor. Returns KeyModReg in X.
 ReadKeyboardAndMouse:
         jsr     ComputeTextOutputPosForCurrentCursorPos
         jsr     ReadCharFromScreen
@@ -4547,10 +4499,9 @@ ReadKeyboardAndMouse:
         jsr     CallSetMouse
         cli
         ldx     MouseSlot
-;;; Mouse pos is always recentered, then compared to the
-;;; MousePos(Min,Max) values to track the mouse movement.
-;;; Mouse movements are mapped to arrow key keypresses
-;;; for later processing.
+;;; Mouse position is always recentered, then compared to the
+;;; MousePos(Min,Max) values to track the mouse movement. Mouse movements
+;;; are mapped to arrow key keypresses for later processing.
         lda     #StartingMousePos
         sta     Mouse::MOUXL,x
         sta     Mouse::MOUYL,x
@@ -4561,8 +4512,8 @@ ReadKeyboardAndMouse:
         sei
         jsr     CallPosMouse
         cli
-;;; Toggle displayed character between cursor character
-;;; and what's under cursor
+;;; Toggle displayed character between cursor character and what's under
+;;; the cursor.
 ToggleCharAtCursor:
         jsr     DisplayCurrentDateAndTimeInMenuBar
         jsr     ReadCharFromScreen
@@ -4710,7 +4661,8 @@ LoadMacroPointer:
         bne     @Loop
 @Out:   rts
 
-;;; Loads $Cs and $s0 values for the mouse slot into X and Y, respectively.
+;;; Loads $Cs and $s0 values for the mouse slot into X and Y,
+;;; respectively.
 LoadXYForMouseCall:
         lda     MouseSlot
         ora     #%11000000
@@ -4963,9 +4915,9 @@ DisplayHelpText:
         lda     SoftSwitch::RWLCRAMB1
         rts
 
-;;; Routine that displays one of the strings in LCRAM bank 2
-;;; pointer is in A (lo), X (hi)
-;;; displays an msb-off string
+;;; Routine that displays one of the strings in LCRAM bank 2. Pointer to
+;;; the string is in A (lo), X (hi). Displays an MSB-off (low ASCII)
+;;; string.
 DisplayString:
         sta     StringPtr
         stx     StringPtr+1
@@ -4976,7 +4928,7 @@ DisplayString:
         and     #%01111111
         bra     LEFD0
 
-;;;  displays an msb-on string
+;;; Same above, but displays an MSB-on (high ASCII) string.
 DisplayMSB1String:
         sta     StringPtr
         stx     StringPtr+1
@@ -5066,7 +5018,9 @@ DrawButtonFrame:
         jsr     OutputOverscoreLine
         rts
 
-;;;  This is like a MLI call; it reads 7 bytes from memory after the JSR.
+;;; Draws a dialog box with the given position, dimensions, and title.
+;;; This is like a ProDOS MLI call; it reads 7 bytes from memory after
+;;;  the JSR.
 ;;; byte    0: ($EA): height of box
 ;;; byte    1: ($EB): width of box
 ;;; byte    2: ($EC): y-coordinate of top-left corner of box
@@ -5079,8 +5033,8 @@ DrawDialogBox:
         sta     ParamTablePtr
         pla
         sta     ParamTablePtr+1
-;;;  ParamTablePtr now points to 1 byte before the start of the param table
-;;;  copy first 4 bytes of param table to $EA - $ED
+;;; ParamTablePtr now points to 1 byte before the start of the param
+;;; table. Copy first 4 bytes of param table to $EA - $ED.
         ldy     #4
 @Loop:  lda     (ParamTablePtr),y
         sta     DialogHeight-1,y
@@ -5093,7 +5047,7 @@ DrawDialogBox:
         tax
         ldy     ScreenYCoord
         jsr     SetCursorPosToXY
-;;; Draw the title string
+;;; Draw the title string.
         ldy     #7
         lda     (ParamTablePtr),y
         tax
@@ -5202,8 +5156,8 @@ CharToUppercase:
         and     #ToUpperCaseANDMask
 @Out:   rts
 
-;;; Restore the text screen (rows 2-9, under the menus)
-;;; from the backing store buffer.
+;;; Restore the text screen (rows 2-9, under the menus) from the backing
+;;; store buffer.
 RestoreScreenAreaUnderMenus:
         lda     #<BackingStoreBuffer
         sta     Pointer3
@@ -5235,8 +5189,8 @@ RestoreScreenAreaUnderMenus:
         bra     @LineLoop
 @Out:   rts
 
-;;; Store text rows 2-9 (which are obscured by menus)
-;;; to the backing store buffer.
+;;; Store text rows 2-9 (which are obscured by menus) to the backing
+;;; store buffer.
 SaveScreenAreaUnderMenus:
         lda     #<BackingStoreBuffer
         sta     Pointer3
@@ -5268,7 +5222,7 @@ SaveScreenAreaUnderMenus:
         bra     @LineLoop
 @Out:   rts
 
-;;; Standard ProDOS tone
+;;; Standard ProDOS tone.
 PlayTone:
         lda     #$20
         sta     PlayToneCounter
@@ -5381,7 +5335,7 @@ CancelBlockSelection:
         sec
         rts
 
-;;; swaps these two lists of control characters
+;;; Swaps these two lists of control characters.
 SwapCursorMovementControlChars:
         ldy     #4
 @Loop:  lda     CursorMovementControlChars,y
@@ -5394,7 +5348,7 @@ SwapCursorMovementControlChars:
         bpl     @Loop
         rts
 
-;;; Remapped Control chars during block selection
+;;; Remapped Control chars during block selection.
 BlockSelectionCursorControlChars:
         .byte   HICHAR(ControlChar::DownArrow)
         .byte   HICHAR(ControlChar::UpArrow)
@@ -5640,7 +5594,7 @@ SendLineAtAXToPrinter:
         jsr     SendCharacterToPrinter
         lda     PrinterLineFeedFlag
         bne     @Out
-        lda     #HICHAR(ControlChar::ControlJ) ; line feed
+        lda     #ControlChar::ControlJ ; line feed
         jsr     SendCharacterToPrinter
 @Out:   rts
 
@@ -5671,8 +5625,8 @@ RestoreCSW:
         sta     ZeroPage::WNDWDTH
         rts
 
-;;; A single-line input routine. Maximum length+1 passed in A.
-;;; Returns with Carry set if input was cancelled with Esc.
+;;; A single-line input routine. Maximum length+1 passed in A. Returns
+;;; with Carry set if input was cancelled with Esc.
 InputSingleLine:
         sta     Pointer3+1
         lda     Columns80::OURCH
@@ -5855,8 +5809,8 @@ IsOnLastDocumentLine:
         cmp     DocumentLineCount+1
 @Out:   rts
 
-;;; Returns the current line length in A,
-;;; and Carry clear if cursor is at (or past) end of line.
+;;; Returns the current line length in A, and Carry clear if cursor is at
+;;; (or past) end of line.
 IsCursorAtEndOfLine:
         jsr     GetLengthOfCurrentLine
         and     #%01111111
@@ -5905,8 +5859,8 @@ DecrementCurrentLineNumber:
 @Out:   rts
 
 LoadCurrentLinePointerIntoAX:
-;;; decrements by 1 to get pointer offset;
-;;; this is because line numbers start at 1
+;;; Decrements by 1 to get pointer offset; this is because line numbers
+;;; start at 1.
         lda     CurrentLineNumber
         ldx     CurrentLineNumber+1
 LoadLineAXPointerIntoAX_1:
@@ -5914,8 +5868,8 @@ LoadLineAXPointerIntoAX_1:
         cmp     #$FF
         bne     LoadLineAXPointerIntoAX
         dex
-;;; multiplies AX by 2 to get offset into line pointer table, then
-;;; loads that pointer into AX.
+;;; Multiplies AX by 2 to get offset into line pointer table, then loads
+;;; that pointer into AX.
 LoadLineAXPointerIntoAX:
         asl     a
         sta     Pointer
@@ -5950,7 +5904,7 @@ IncrementCurrentLineNumber:
         inc     CurrentLineNumber+1
 @Out:   rts
 
-;;; This routine is never referenced
+;;; This routine is never referenced.
         ldx     CurrentLineNumber+1
         lda     CurrentLineNumber
         clc
@@ -5962,8 +5916,8 @@ LF6C9:  jsr     LoadLineAXPointerIntoAX_1
         stx     NextLinePtr+1
         rts
 
+;;; Moves the cursor to the previous line, and scrolls down if necessary.
 MoveToPreviousDocumentLine:
-;;; scrolls down if necessary
         lda     CurrentCursorYPos
         cmp     #TopTextLine
         beq     @DoScroll
@@ -5976,7 +5930,7 @@ MoveToPreviousDocumentLine:
         jsr     DrawCurrentDocumentLine
         rts
 
-;;; scrolls up if necessary
+;;; Moves the cursor to the next line, and scrolls up if necessary.
 MoveToNextDocumentLine:
         lda     CurrentCursorYPos
         cmp     #BottomTextLine
@@ -5990,8 +5944,8 @@ MoveToNextDocumentLine:
         jsr     DrawCurrentDocumentLine
         rts
 
-;;; Move left past all spaces in current line,
-;;; starting at position Y. Updates Y.
+;;; Moves left past all spaces in current line, starting at position Y.
+;;; Updates Y.
 SkipSpacesBackward:
         cpy     #2
         blt     @Out
@@ -6001,8 +5955,8 @@ SkipSpacesBackward:
         beq     SkipSpacesBackward
 @Out:   rts
 
-;;; Move right past all spaces in current line,
-;;; starting at position Y. Updates Y.
+;;; Moves right past all spaces in current line, starting at position Y.
+;;; Updates Y.
 SkipSpacesForward:
         cpy     LastEditableColumn
         beq     @Out
@@ -6012,8 +5966,8 @@ SkipSpacesForward:
         beq     SkipSpacesForward
 @Out:   rts
 
-;;; Move left past all non-spaces in current line,
-;;; starting at position Y. Updates Y.
+;;; Moves left past all non-spaces in current line, starting at position
+;;; Y. Updates Y.
 SkipNonSpacesBackward:
         cpy     #2
         blt     @Out
@@ -6024,8 +5978,8 @@ SkipNonSpacesBackward:
         iny
 @Out:   rts
 
-;;; Move right past all non-spaces in current line,
-;;; starting at position Y. Updates Y.
+;;; Moves right past all non-spaces in current line, starting at position
+;;;  Y. Updates Y.
 SkipNonSpacesForward:
         cpy     LastEditableColumn
         beq     @Out
@@ -6035,7 +5989,7 @@ SkipNonSpacesForward:
         bne     SkipNonSpacesForward
 @Out:   rts
 
-;;; set current line to 1 and load it into CurrentLinePtr.
+;;; Sets the current line to 1 and loads it into CurrentLinePtr.
 SetCurrentLinePointerToFirstLine:
         stz     CurrentLineNumber+1
         lda     #1
@@ -6046,9 +6000,8 @@ SetCurrentLinePointerToFirstLine:
         stx     CurrentLinePtr+1
         rts
 
-;;; Pads line with spaces if line length is less than
-;;; current cursor x-position. Updates line length,
-;;; preserving MSB.
+;;; Pads line with spaces if line length is less than current cursor
+;;; x-position. Updates line length, preserving CR flag.
 PadLineWithSpacesUpToCursor:
         jsr     GetLengthOfCurrentLine
         and     #%01111111 ; clear MSB
@@ -6068,9 +6021,8 @@ LF768:  tya
 LF769:  jsr     SetLengthOfCurrentLine
         rts
 
-;;; If on the last line of the doc, set its length to 0.
-;;; Otherwise insert a new line. The newly inserted line
-;;; will be at NextLinePtr.
+;;; If on the last line of the doc, sets its length to 0. Otherwise
+;;; inserts a new line. The newly inserted line will be at NextLinePtr.
 InsertNewLine:
         jsr     LoadNextLinePointer
         jsr     IsOnLastDocumentLine
@@ -6101,9 +6053,8 @@ DecrementDocumentLineCount:
         dec     DocumentLineCount+1
 @Out:   rts
 
-;;; Splits a line at the cursor. Y should also be set
-;;; to the current cursor position within the line prior
-;;; to calling.
+;;; Splits a line at the cursor. Y should also be set to the current
+;;; cursor position within the line prior to calling.
 SplitLineAtCursor:
         jsr     GetLengthOfCurrentLine
         bpl     LF7B1 ; branch if no CR at end of line
@@ -6146,10 +6097,9 @@ LF7E8:  jsr     GetLengthOfCurrentLine
         lda     #0
         bra     LF7E4
 
-;;; Line number is 1-based; since this doesn't subtract
-;;; 1 from the line number before accessing the line
-;;; pointer table, it's actually loading the pointer to
-;;; the line following the current line.
+;;; Line number is 1-based; since this doesn't subtract 1 from the line
+;;; number before accessing the line pointer table, it's actually loading
+;;; the pointer to the line following the current line.
 LoadNextLinePointer:
         ldx     CurrentLineNumber+1
         lda     CurrentLineNumber
@@ -6223,8 +6173,8 @@ ShiftLinePointersUpForDelete:
         jsr     LoadNextLinePointer
 @Out:   rts
 
-;;; Word-wraps (reflows) the text up to the next CR
-;;; (the end of the text line).
+;;; Word-wraps (reflows) the text up to the next CR (the end of the text
+;;; line).
 WordWrapUpToNextCR:
         jsr     SaveCurrentLineState2
         stz     WordWrapScratchVal4 ; Val4 = 0
@@ -6249,7 +6199,7 @@ LF8B2:  sta     WordWrapScratchVal2 ; Val2 = length of next line
         cmp     #2
         blt     LF893 ; branch if only 1 char of space left
         tay     ; Y = space left
-        cmp     WordWrapScratchVal2 ; enough space for all text on next line?
+        cmp     WordWrapScratchVal2 ; enough space for text on next line?
         blt     LF8DD               ; branch if no
         ldy     WordWrapScratchVal2 ; Y = length of next line
         jsr     GetLengthOfNextLine ; if next line has a CR,
@@ -6291,7 +6241,7 @@ LF916:  iny
         bne     LF916
         jsr     IsOnLastDocumentLine ; if this is the last line in the
         beq     WordWrapDone         ; document, then all done
-        jsr     SetCurrentLinePointerToNextLine  ; remove text that was moved
+        jsr     SetCurrentLinePointerToNextLine ; remove moved text
 LF92B:  ldy     #1                   ; from the front of the next line
         jsr     RemoveCharAtYOnCurrentLine
         lda     ScratchVal4
@@ -6310,9 +6260,9 @@ WordWrapDone:
         lda     WordWrapScratchVal4
         rts
 
-;;; Returns the amount of space left on the previous line,
-;;; if there is a previous line AND that line doesn't end
-;;; with a CR; otherwise returns 0.
+;;; Returns the amount of space left on the previous line, if there is a
+;;; previous line AND that line doesn't end with a CR; otherwise returns
+;;; 0.
 GetSpaceLeftOnPreviousLine:
         jsr     IsOnFirstDocumentLine
         beq     @IsFirst
@@ -6356,7 +6306,7 @@ RemoveCharAtYOnCurrentLine:
         jsr     SetLengthOfCurrentLine
 @Out:   rts
 
-;;; moves current word to next line if it won't fit on current one
+;;; Moves current word to next line if it won't fit on current one.
 MoveWordToNextLine:
         jsr     InsertNewLine
 ;;; search backward for the beginning of the word
@@ -6391,13 +6341,13 @@ LF9DB:  and     #%01111111
         jsr     SetCurrentLinePointerToPreviousLine
         rts
 
+;;; A = *CurrentLinePtr
 GetLengthOfCurrentLine:
-;;;  A = *CurrentLinePtr
         sty     YRegisterStorage
         ldy     #0
         bra     LF9F4
-GetCharAtYInCurrentLine:
 ;;; A = *(CurrentLinePtr + Y)
+GetCharAtYInCurrentLine:
         sty     YRegisterStorage
 LF9F4:  lda     CurrentLinePtr
         lsr     a
@@ -6412,8 +6362,8 @@ LFA01:  pha
 LFA07:  lda     (CurrentLinePtr),y
         bra     LFA01
 
-GetLengthOfNextLine:
 ;;; A = *NextLinePtr
+GetLengthOfNextLine:
         sty     YRegisterStorage
         ldy     #0
         bra     LFA15
@@ -6433,13 +6383,13 @@ LFA22:  pha
 LFA28:  lda     (NextLinePtr),y
         bra     LFA22
 
-SetLengthOfCurrentLine:
 ;;; *CurrentLinePtr = A
+SetLengthOfCurrentLine:
         sty     YRegisterStorage
         ldy     #0
         bra     LFA36
-SetCharAtYInCurrentLine:
 ;;; *(CurrentLinePtr + Y) = A
+SetCharAtYInCurrentLine:
         sty     YRegisterStorage
 LFA36:  pha
         lda     CurrentLinePtr
@@ -6456,8 +6406,8 @@ LFA49:  pla
         ldy     YRegisterStorage
         rts
 
-SetLengthOfNextLine:
 ;;; *(NextLinePtr) = A
+SetLengthOfNextLine:
         sty     YRegisterStorage
         ldy     #0
         bra     LFA5A
@@ -6491,7 +6441,7 @@ CopyCurrentLineToSysPathBuf:
         bne     @Loop
 @Out:   rts
 
-;;; Extended Keyboard II functions keys, remapped to Apple key combos
+;;; Extended Keyboard II functions keys, remapped to Apple key combos.
 FunctionKeys:
         .byte   6
         .byte   ControlChar::Help
@@ -6503,14 +6453,13 @@ FunctionKeys:
 
 FunctionKeysRemapped:
         .byte   '?'
-        .byte   '1'
+        .byte   ','
         .byte   ControlChar::UpArrow
         .byte   'F'
-        .byte   '9'
+        .byte   '.'
         .byte   ControlChar::DownArrow
 
 ;;;  Table of Open-Apple key commands and handlers
-
 OpenAppleKeyComboTable:
         .byte   46              ; number of key combos
 
@@ -6613,7 +6562,7 @@ OpenAppleKeyComboJumpTable:
         .addr   CopyToOrFromClipboard     ; C
         .addr   CopyToOrFromClipboard     ; c
 
-;;; Table of other key commands and handlers
+;;; Table of other key commands and handlers.
 EditingControlKeyTable:
         .byte   8 ; count byte
         .byte   HICHAR(ControlChar::Tab)
@@ -6647,13 +6596,13 @@ MenuWidths:
 MenuCount:
         .byte   3
 
-;;; Pointers into Menu Item strings table below (for each menu)
+;;; Pointers into Menu Item strings table below (for each menu).
 MenuItemListAddresses:
         .addr   FileMenuItemTitles
         .addr   UtilitiesMenuItemTitles
         .addr   OptionsMenuItemTitles
 
-;;;  Addresses of Menu Item strings
+;;; Addresses of Menu Item strings.
 MenuItemTitleTable:
 FileMenuItemTitles:
         .addr   TDCFA
@@ -6766,7 +6715,7 @@ DateTimeFormatString:
 MonthNames:
         highascii "-Jan-Feb-Mar-Apr-May-Jun-Jul-Aug-Sep-Oct-Nov-Dec-"
 
-;;; General purpose buffer for formatting short strings (10 bytes)
+;;; General purpose buffer for formatting short strings (10 bytes).
 StringFormattingBuffer:
         repeatbyte $00, 10
 
@@ -6855,7 +6804,7 @@ MacroTable:
 ;;; Macro 1
         .byte   68 ; length byte
         highascii "\r EdIt! - by Bill Tudor\r"
-        highascii "   Copyright 1988-89\r"
+        highascii "   Copyright 1988-83\r" ; typo
         highascii "Northeast Micro Systems"
         .byte   $00,$00
 
@@ -6901,6 +6850,9 @@ BC00_Code_Start := *
 ShutdownRoutine:
         sta     SoftSwitch::SETSTDZP
         lda     SoftSwitch::RDROMLCB1
+        jsr     ProDOS::MLI
+        .byte   ProDOS::CDEALLOCINT
+        .addr   EditorDeallocIntParams
 ;;; Restore /RAM
         lda     RAMDiskUnitNum
         beq     LBC40
@@ -6927,7 +6879,6 @@ ShutdownRoutine:
         lda     SoftSwitch::RWLCRAMB1
 RAMDiskDriverAddress := * + 1
         jsr     $0000
-LBC3D           := * + 1 ; is this branch target a bug?
         bit     SoftSwitch::RDROMLCB2
         cli
 ;;; If there's a calling program, load & execute it.
@@ -6958,7 +6909,7 @@ LBC46:  lda     SavedPathToCallingProgram,y
         sta     EditorReadWriteBufferAddr+1
         jsr     ProDOS::MLI
         .byte   ProDOS::CREAD
-        bcc     LBC3D
+        .addr   EditorReadWriteParams
         php
         jsr     ProDOS::MLI
         .byte   ProDOS::CCLOSE
@@ -6966,7 +6917,7 @@ LBC46:  lda     SavedPathToCallingProgram,y
         plp
         bcc     JumpToCallingProgram
 
-;;; Clear the screen and exit to ProDOS
+;;; Clears the screen and exits to ProDOS.
 LBC8A:  jsr     Monitor::HOME
         lda     #ControlChar::TurnOff80Col
         jsr     Monitor::COUT
@@ -6989,7 +6940,7 @@ SavedPathToCallingProgram:
         .byte   $00 ; length byte
         repeatbyte $00, ProDOS::MaxPathnameLength
 
-;;; Reset routine (hooked to reset vector)
+;;; Reset routine (hooked to reset vector).
 ResetHandler:
         jsr     ResetTextScreen
         sta     SoftSwitch::SETALTZP
@@ -7039,9 +6990,16 @@ CallWaitMonitorRoutine:
         sta     SoftSwitch::SETALTZP
         lda     SoftSwitch::RWLCRAMB1
         lda     SoftSwitch::RWLCRAMB1
+InterruptHandler:
+        cld
+        clc
         rts
 
-;;; Makes a MLI call; call # in A, param list address in X (lo), Y (hi)
+EditorDeallocIntParams:
+        .byte   $01
+        .byte   $00
+
+;;; Makes a MLI call; call # in A, param list address in X (lo), Y (hi).
 MakeMLICall:
         sta     MLICallNumber
         stx     MLICallParamTableAddr
@@ -7134,7 +7092,7 @@ EditorSetMarkParams:
         .byte   $02 ; param_count
 EditorSetMarkRefNum:
         .byte   $00 ; ref_num
-        .byte   $C3,$37,$00 ; position
+        .byte   $66,$36,$00 ; position
 
 PathnameLength: ; copy of first byte of PathnameBuffer
         .byte   $00
@@ -7263,7 +7221,18 @@ RAMDiskUnitNum:
 CallSetMouse:
          jmp    $0000
 CallInitMouse:
-         jmp    $0000
+         sta    SoftSwitch::SETSTDZP
+         pha
+         lda    SoftSwitch::RDROMLCB1
+        pla
+InitMouseEntry := *+1
+         jsr    $0000
+         sta    SoftSwitch::SETALTZP
+         pha
+         lda    SoftSwitch::RWLCRAMB1
+         lda    SoftSwitch::RWLCRAMB1
+         pla
+         rts
 CallReadMouse:
          jmp    $0000
 CallPosMouse:
@@ -7478,7 +7447,7 @@ TD500:  .byte   MT_REMAP(MouseText::RightVerticalBar)
         .byte   HICHAR(ControlChar::Return)
         repeatbyte HICHAR(' '), 17
         .byte   MT_REMAP(MouseText::Diamond)
-        highascii " Copyright 1988-89  Northeast Micro Systems "
+        highascii " Copyright 1988-93  Northeast Micro Systems "
 
         .byte   MT_REMAP(MouseText::Diamond)
         .byte   $00
@@ -7489,7 +7458,7 @@ TD591:  .byte   12
 
 TD59E:  msb1pstring "Search for:"
 TD5AA:  msb1pstring "Searching...."
-TD5B8:  msb1pstring "Not Found; press a key."
+TD5B8:  msb1pstring "Not Found; press RTN."
 TD5D0:  msb1pstring "Copy Text [T]o or [F]rom the clipboard?"
 TD5F8:  msb1pstring "Clipboard is empty."
 TD60C:  msb1pstring "Clipboard is full."
@@ -7615,13 +7584,13 @@ TD964:  .byte   15
 TD974:  msb1pstring " Clear Memory "
 TD983:  msb1pstring "Erase memory contents?"
 TD99A:  msb1pstring " Ed-It! "
-TD9A3:  msb1pstring "Ed-It! - A Text File Editor\r\r"
+TD9A3:  msb1pstring "Ed-It! - A Text File Editor\r\r\r"
 TD9C1:  msb1pstring "by Bill Tudor\r\r"
-TD9D1:  msb1pstring "Northeast Micro Systems\r"
-TD9EA:  msb1pstring "  v3.01     Dec. 1989\r\r"
-TDA02:  msb1pstring "Copyright 1988-89               All Rights Reserved"
-TDA36:  msb1pstring "  1220 Gerling Street\r"
-TDA4D:  msb1pstring " Schenectady, NY 12308\r"
+TD9D1:  msb1pstring "                       \r"
+TD9EA:  msb1pstring "Version 3.04   Aug 1993\r\r"
+TDA02:  msb1pstring "Copyright 1988-93               All Rights Reserved"
+TDA36:  msb1pstring "                     \r"
+TDA4D:  msb1pstring "                      \r"
 TDA65:  msb1pstring "Replace old version of file (Y/N)?"
 TDA88:  msb1pstring " Load File "
 
