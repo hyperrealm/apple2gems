@@ -44,17 +44,13 @@ state asm extends HighlightEntry
   }
 
   /* Assignments. */
-  /^([^ \t]+)([ \t]*)(:=)([ \t]*)([^ \t]+)([ \t]*)/ {
+  /^([^ \t]+)([ \t]*:=.*)/ {
     function_name_face (true);
     language_print ($1);
     function_name_face (false);
     language_print ($2);
-    language_print ($3);
-    language_print ($4);
-    language_print ($5);
   }
-
- 
+  
   /* And finally, highlight string constants. */
   /\"/ {
     string_face (true);

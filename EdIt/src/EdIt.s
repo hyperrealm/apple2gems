@@ -343,7 +343,7 @@ L220C:  lda     ProDOS::DEVCNT,x
         lda     ProDOS::DEVADR0+1
         sta     ProDOS::DEVADR0+1,y
         jmp     AfterRAMDiskDisconnected
-;;; Read volume directory block
+;;; Read volume directory block.
 L2234:  jsr     ProDOS::MLI
         .byte   ProDOS::CRDBLOCK
         .addr   ReadBlockParams
@@ -473,10 +473,9 @@ L2333:  stz     ExecutableFilePathnameBuffer ; can't determine exe path
         lda     SoftSwitch::RDROMLCB1
 L234A:  jmp     AfterConfigFileRead
 SaveCallingProgramInfo:
-;;; Save calling program path and entry point address.
-;;; Get the directory portion of that path; if there is
-;;; one, use that as the directory to load config files
-;;; from; otherwise, branch backward to use the
+;;; Save calling program path and entry point address. Get the directory
+;;; portion of that path if there is one, use that as the directory to
+;;; load config files from; otherwise, branch backward to use the
 ;;; directory that this SYS program is in, if possible.
         lda     CallingProgramPath
         tay
@@ -496,12 +495,12 @@ L236F:  sta     JumpToCallingProgram+2
         lda     CallingProgramPath
         tay
 L2376:  lda     CallingProgramPath,y ; search backward for slash
-        and     #MSBOffANDMask           ; to get directory part
+        and     #MSBOffANDMask       ; to get directory part
         cmp     #'/'
         beq     L2385
         dey
         bne     L2376
-        jmp     L22DB              ; no slash found
+        jmp     L22DB ; no slash found
 L2385:  sty     GetFileInfoModDate ; save length up to slash
         ldy     #1
 L238A:  lda     CallingProgramPath,y ; copy that path
@@ -939,17 +938,17 @@ GetFileInfoParams:
         .byte   $0A
 GetFileInfoPathname:
         .addr   $0000
-        .byte   $00             ; access
+        .byte   $00   ; access
 GetFileInfoFileType:
         .byte   $00
-        .word   $0000           ; aux_type
-        .byte   $00             ; storage_type
-        .word   $0000           ; blocks_used
+        .word   $0000 ; aux_type
+        .byte   $00   ; storage_type
+        .word   $0000 ; blocks_used
 GetFileInfoModDate:
-        .word   $0000           ; mod_date
-        .word   $0000           ; mod_time
-        .word   $0000           ; create_date
-        .word   $0000           ; create_time
+        .word   $0000 ; mod_date
+        .word   $0000 ; mod_time
+        .word   $0000 ; create_date
+        .word   $0000 ; create_time
 
         .reloc
 
@@ -962,7 +961,8 @@ MainEditor_Code_Start := *
 MainEditorStart:
         jsr     ClearTextWindow
         jsr     DrawMenuBarAndMenuTitles
-LD006:  jsr     OutputStatusBarLine
+MainEditorWarmStart:
+        jsr     OutputStatusBarLine
         lda     #TopTextLine
         sta     ZeroPage::WNDTOP
         lda     #BottomTextLine+1
@@ -1044,41 +1044,43 @@ LD0A5:  dey
         tax
         jmp     (EditingControlKeyJumpTable,x)
 
-;;; Handlers for menu items in "Utilities" menu
+;;; Handlers for menu items in "Utilities" menu.
 SetNewPrefix:
         ldx     #1 ; New Prefix
-        bra     LD0B6
+        bra     DispatchToUtilitiesMenu
 ListVolumes:
         ldx     #2 ; Volumes
-        bra     LD0B6
+        bra     DispatchToUtilitiesMenu
 ListDirectoryMenuItem:
         ldx     #0 ; Directory
-LD0B6:  lda     #1 ; Menu number 1
+DispatchToUtilitiesMenu:
+        lda     #1 ; Menu number 1
         bra     DispatchToMenuItemHandler
 
 ;;; Handlers for menu items in "File" menu
 DisplayAboutBox:
         ldx     #0 ; About
-        bra     LD0DB
+        bra     DispatchToFileMenu
 PrintDocument:
         ldx     #3 ; Print
-        bra     LD0DB
+        bra     DispatchToFileMenu
 QuitEditor:
         ldx     #5 ; Quit
-        bra     LD0DB
+        bra     DispatchToFileMenu
 LoadFileMenuItem:
         ldx     #1 ; Load File
-        bra     LD0DB
+        bra     DispatchToFileMenu
 SaveFile:
         ldx     #2 ; Save/Save As
         lda     PathnameBuffer
-        beq     LD0DB
+        beq     DispatchToFileMenu
         sta     PathnameLength
         sta     CurrentDocumentPathnameLength
-        bra     LD0DB
+        bra     DispatchToFileMenu
 ClearMemory:
         ldx     #4 ; Clear Memory
-LD0DB:  lda     #0 ; Menu number 0
+DispatchToFileMenu:
+        lda     #0 ; Menu number 0
 
 ;;; Dispatch to menu item handler; menu # in A, menu item # in X.
 DispatchToMenuItemHandler:
@@ -1168,7 +1170,7 @@ LD178:  jsr     SetCurrentLinePointerToPreviousLine
         lda     #TopTextLine
         sta     CurrentCursorYPos
         jmp     MainEditorInputLoop
-;;;  back one screenful
+;;; Back one screenful.
 LD186:  ldy     #VisibleLineCount
 LD188:  jsr     SetCurrentLinePointerToPreviousLine
         dey
@@ -1181,7 +1183,7 @@ LD188:  jsr     SetCurrentLinePointerToPreviousLine
 LD19A:  jsr     SetCurrentLinePointerToFirstLine
 LD19D:  lda     #TopTextLine
         sta     CurrentCursorYPos
-        jsr     MainEditorRedrawDocument ; should be a jmp
+        jsr     MainEditorRedrawDocument ; bug - should be a jmp
 
 PageDown:
         jsr     IsOnLastDocumentLine
@@ -1359,7 +1361,7 @@ OverwriteCharacter: ; overwrite mode
         sty     CurrentCursorXPos
 LD322:  cmp     #' '
         bne     LD36E
-;;; see if the word just completed would fit on the previous line
+;;; See if the word just completed would fit on the previous line.
         jsr     GetSpaceLeftOnPreviousLine
         cmp     CurrentCursorXPos
         blt     LD36E ; no...won't fit
@@ -1453,7 +1455,7 @@ LD3F6:  pla                     ; set the char in the newly opened
         jsr     SetCharAtYInCurrentLine
         inc     CurrentCursorXPos
         jmp     LD322
-;;; char won't fit on current line
+;;; Char won't fit on current line.
 LD401:  jsr     CheckIfMemoryFull
         beq     LD435
         jsr     MoveWordToNextLine ; move last word on line to next line
@@ -1475,7 +1477,7 @@ LD401:  jsr     CheckIfMemoryFull
 
         jsr     PlayTone ; unreachable instruction
 
-LD435:  pla     ; should this label have been on previous instruction?
+LD435:  pla     ; bug - should this label be on previous instruction?
         jmp     MainEditorInputLoop
 
 DeleteChar:
@@ -1876,8 +1878,8 @@ EditTabStops:
         lda     #<TextTabStopEditingInstructions
         ldx     #>TextTabStopEditingInstructions
         jsr     DisplayStringInStatusLine
-;;; draw ruler with tab stops
-LD79F:  ldy     #22
+DrawRulerWithTabStops:
+        ldy     #22
         ldx     #0
         jsr     SetCursorPosToXY
         ldy     #ColumnCount
@@ -1932,7 +1934,7 @@ LD80E:  ldy     ScratchVal1
         beq     LD81C
         inc     a
 LD817:  sta     TabStops,y
-        bra     LD79F
+        bra     DrawRulerWithTabStops
 LD81C:  dec     a
         bne     LD817
 ;;; Move left
@@ -1952,7 +1954,7 @@ LD831:  lda     ScratchVal1
 LD83E:  inc     ScratchVal1
         bne     LD7C5
 ;;; Done editing
-LD843:  jmp     LD006
+LD843:  jmp     MainEditorWarmStart
 ;;; Clear all tab stops
 LD846:  ldx     LastEditableColumn
 LD849:  stz     TabStops,x
@@ -1967,7 +1969,7 @@ LD854:  cpx     LastEditableColumn
         lda     TabStops,x
         beq     LD854
 LD85F:  stx     ScratchVal1
-LD862:  jmp     LD79F
+LD862:  jmp     DrawRulerWithTabStops
 ;;; Move to previous tab
 LD865:  ldx     ScratchVal1
 LD868:  cpx     #0
@@ -1975,7 +1977,7 @@ LD868:  cpx     #0
         dex
         lda     TabStops,x
         beq     LD868
-        bne     LD85F ; branch always taken
+        bne     LD85F ; branch always taken (should be bra)
 
 DisplayHelpScreen:
         jsr     ClearTextWindow
@@ -2449,7 +2451,7 @@ LDC29:  lda     ProDOS::SysPathBuf
         cmp     #2
         blt     LDC13
         jmp     LDCDB
-;;; Slot/Drive entry
+;;; Slot/Drive entry.
 LDC33:  stz     EditorOnLineUnitNum
         ldy     #16
         ldx     #25
@@ -2506,7 +2508,7 @@ LDC96:  jsr     OutputCharAndAdvanceScreenPos
         jsr     MakeMLICall
         pha
         php
-;;; restore param table to previous values
+;;; Restore param table to previous values.
         stz     EditorOnLineUnitNum
         lda     #<DataBuffer
         sta     EditorOnLineDataBuffer
@@ -2540,14 +2542,14 @@ LDCE0:  lda     ProDOS::SysPathBuf,x
         beq     LDCFB
         jsr     DisplayProDOSErrorAndWaitForKeypress
         jmp     DisplaySetPrefixDialog
-;;; copy prefix back to prefix buffer
+;;; Copy prefix back to prefix buffer.
 LDCFB:  ldy     ProDOS::SysPathBuf-1
 LDCFE:  lda     ProDOS::SysPathBuf-1,y
         sta     PrefixBuffer,y
         dey
         bpl     LDCFE
         ldy     PrefixBuffer
-;;; append trailing slash if needed
+;;; Append trailing slash if needed.
         lda     PrefixBuffer,y
         and     #MSBOffANDMask
         cmp     #'/'
@@ -5476,17 +5478,17 @@ LF37B:  jsr     GetKeypress ; input routine
         cmp     #HICHAR(ControlChar::Esc)
         beq     LF31E
         cmp     #HICHAR('C')
-        beq     LF397
+        beq     PrintFromCursor
         cmp     #HICHAR('S')
-        beq     LF392
+        beq     PrintFromStart
         jsr     PlayTone
         bra     LF37B
-;;; print from start
-LF392:  pha
+PrintFromStart:
+        pha
         jsr     SetCurrentLinePointerToFirstLine
         pla
-;;; print from cursor
-LF397:  jsr     OutputCharAndAdvanceScreenPos
+PrintFromCursor:
+        jsr     OutputCharAndAdvanceScreenPos
         ldy     #11
         ldx     #20
         jsr     SetCursorPosToXY
@@ -5497,7 +5499,7 @@ LF397:  jsr     OutputCharAndAdvanceScreenPos
         ora     #%11000000 ; $Cs
         sta     Pointer+1
         stz     Pointer
-;;; Check for Serial firmware signature bytes
+;;; Check for Serial firmware signature bytes.
         ldy     #7
         lda     (Pointer),y
         cmp     #$18
@@ -5559,7 +5561,7 @@ LF417:  jsr     DisableCSW
         jsr     OutputStatusBarLine
 LF437:  lda     #NumLinesOnPrintedPage-1 ; lines left on page
         bra     LF442
-;;; Start next printed page
+;;; Start next printed page.
 LF43B:  lda     #ControlChar::ControlL ; form feed
         jsr     SendCharacterToPrinter
         lda     #NumLinesOnPrintedPage
@@ -5576,7 +5578,7 @@ LF454:  jsr     IsOnLastDocumentLine
         dec     ScratchVal4
         bne     LF445
         bra     LF43B
-;;; finish or abort print
+;;; Finish or abort print.
 LF463:  lda     #ControlChar::ControlL ; form feed
         jsr     SendCharacterToPrinter
         jsr     RestoreCSW
@@ -8020,3 +8022,5 @@ MacroNumberBeingEdited:
         .byte $00
 
         .reloc
+
+;;; End of source file.
