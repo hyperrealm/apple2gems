@@ -2367,8 +2367,8 @@ DisplayAboutDialog:
         jsr     DrawDialogBox
         .byte   10 ; height
         .byte   60 ; width
-        .byte   6  ; x-coord
-        .byte   10 ; y-coord
+        .byte   6  ; y-coord
+        .byte   10 ; x-coord
         .byte   36 ; x-coord of title
         .addr   TextAboutDialogTitle
         ldy     #8
