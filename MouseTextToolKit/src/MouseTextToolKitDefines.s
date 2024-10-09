@@ -1,160 +1,212 @@
 
-CallStartDeskTop        := $00
-CallStopDeskTop         := $01
-CallSetCursor           := $02
-CallShowCursor          := $03
-CallHideCursor          := $04
-CallCheckEvents         := $05
-CallGetEvent            := $06
-CallFlushEvents         := $07
-CallSetKeyEvent         := $08
-CallInitMenu            := $09
-CallSetMenu             := $0A
-CallMenuSelect          := $0B
-CallMenuKey             := $0C
-CallHiliteMenu          := $0D
-CallDisableMenu         := $0E
-CallDisableMenuItem     := $0F
-CallCheckMenuItem       := $10
-CallPascIntAdr          := $11
-CallSetBasAdr           := $12
-CallVersion             := $13
-CallSetMark             := $14
-CallPeekEvent           := $15
-CallInitWindowMgr       := $16
-CallOpenWindow          := $17
-CallCloseWindow         := $18
-CallCloseAllWindows     := $19
-CallFindWindow          := $1A
-CallFrontWindow         := $1B
-CallSelectWindow        := $1C
-CallTrackGoAway         := $1D
-CallDragWindow          := $1E
-CallGrowWindow          := $1F
-CallWindowToScreen      := $20
-CallScreenToWindow      := $21
-CallWinChar             := $22
-CallWinString           := $23
-CallWinBlock            := $24
-CallWinOp               := $25
-CallWinText             := $26
-CallFindControl         := $27
-CallSetCtlMax           := $28
-CallTrackThumb          := $29
-CallUpdateThumb         := $2A
-CallActivateCtl         := $2B
-CallObscureCursor       := $2C
-CallGetWinPtr           := $2D
-CallPostEvent           := $2E
-CallSetUserHook         := $2F
-CallKeyboardMouse       := $30
+.scope MTTKCall
+        
+StartDeskTop        := $00
+StopDeskTop         := $01
+SetCursor           := $02
+ShowCursor          := $03
+HideCursor          := $04
+CheckEvents         := $05
+GetEvent            := $06
+FlushEvents         := $07
+SetKeyEvent         := $08
+InitMenu            := $09
+SetMenu             := $0A
+MenuSelect          := $0B
+MenuKey             := $0C
+HiliteMenu          := $0D
+DisableMenu         := $0E
+DisableMenuItem     := $0F
+CheckMenuItem       := $10
+PascIntAdr          := $11
+SetBasAdr           := $12
+Version             := $13
+SetMark             := $14
+PeekEvent           := $15
+InitWindowMgr       := $16
+OpenWindow          := $17
+CloseWindow         := $18
+CloseAllWindows     := $19
+FindWindow          := $1A
+FrontWindow         := $1B
+SelectWindow        := $1C
+TrackGoAway         := $1D
+DragWindow          := $1E
+GrowWindow          := $1F
+WindowToScreen      := $20
+ScreenToWindow      := $21
+WinChar             := $22
+WinString           := $23
+WinBlock            := $24
+WinOp               := $25
+WinText             := $26
+FindControl         := $27
+SetControlMax       := $28
+TrackThumb          := $29
+UpdateThumb         := $2A
+ActivateControl     := $2B
+ObscureCursor       := $2C
+GetWinPtr           := $2D
+PostEvent           := $2E
+SetUserHook         := $2F
+KeyboardMouse       := $30
 
+.endscope
 
-ErrNone			:= $00
-ErrInvalidCall		:= $01
-ErrWrongParamCount	:= $02
-ErrDesktopNotStarted	:= $03
-ErrOSNotSupported	:= $04
-ErrInvalidSlotNum	:= $05
-ErrMouseNotFound	:= $06
-ErrInterruptModeInUse	:= $07
-ErrInvalidMenuID	:= $08
-ErrInvalidMenuItemNum	:= $09
-ErrSaveAreaTooSmall	:= $0A
-ErrInstallIntFailed	:= $0B
-ErrWindowAlreadyOpen	:= $0C
-ErrWindowBufferTooSmall := $0D
-ErrBadWindowInfo	:= $0E
-ErrInvalidWindowID	:= $0F
-ErrNoWindows		:= $10
-ErrUserHookRoutineError	:= $11
-ErrInvalidControlID	:= $12
-ErrEventQueueFull	:= $13
-ErrInvalidEvent		:= $14
-ErrInvalidUserHookID	:= $15
-ErrCallFailed		:= $16
+.scope MTTKError
+        
+None			:= $00
+InvalidCall		:= $01
+WrongParamCount	        := $02
+DesktopNotStarted	:= $03
+OSNotSupported	        := $04
+InvalidSlotNum	        := $05
+MouseNotFound	        := $06
+InterruptModeInUse	:= $07
+InvalidMenuID	        := $08
+InvalidMenuItemNum	:= $09
+SaveAreaTooSmall	:= $0A
+InstallIntFailed	:= $0B
+WindowAlreadyOpen	:= $0C
+WindowBufferTooSmall    := $0D
+BadWindowInfo	        := $0E
+InvalidWindowID	        := $0F
+NoWindows		:= $10
+UserHookRoutineError	:= $11
+InvalidControlID	:= $12
+EventQueueFull  	:= $13
+InvalidEvent		:= $14
+InvalidUserHookID	:= $15
+CallFailed		:= $16
 
-EventTypeNone := $0
-EventTypeButtonDown := $1
-EventTypeButtonUp := $2
-EventTypeKeyPress := $3
-EventTypeDrag := $4
-EventTypeAppleKeyDown := $5
-EventTypeUpdate := $6
+.endscope
 
-MouseTextCharPointer := $02
-MouseTextCharHourglass := $03
-MouseTextCharCheckmark := $04
-MouseTextCharTextCursor := $14
-MouseTextCharCellCursor := $1D
+.scope MTTKEventType
+        
+None            := $0
+ButtonDown      := $1
+ButtonUp        := $2
+KeyPress        := $3
+Drag            := $4
+AppleKeyDown    := $5
+Update          := $6
 
-MenuOptionMaskDisabled := $80
+.endscope
 
-MenuItemOptionMaskDisabled := $80
-MenuItemOptionMaskIsFiller := $40
-MenuItemOptionMaskIsChecked := $20
-MenuItemOptionMaskHasMark := $4
-MenuItemOptionMaskSolidAppleModifier := $2
-MenuItemOptionMaskOpenAppleModifier := $1
+.scope MTTKMenuOption
+        
+Disabled := %10000000
 
-KeyModifierNone := $0
-KeyModifierOpenApple := $1
-KeyModifierSolidApple := $2
+.endscope
 
-WindowStatusMaskOpen := $80
-WindowStatusMaskMysteryBit3 := $08
-WindowStatusMaskDrawResizeBox := $04
-WindowStatusMaskDrawVertScrollbar := $02
-WindowStatusMaskDrawHorizScrollbar := $01
+.scope MTTKMenuItemOption
+        
+Disabled           := %10000000
+IsFiller           := %01000000
+IsChecked          := %00100000
+HasMark            := %00000100
+SolidAppleModifier := %00000010
+OpenAppleModifier  := %00000001
 
-WindowOptionMaskDocPtrFn := $80
-WindowOptionMaskResizeBoxPresent := $4
-WindowOptionMaskCloseBoxPresent := $2
-WindowOptionMaskIsDialogOrAlert := $1
+.endscope
+        
+.scope MTTKKeyModifier
+        
+None            := $0
+OpenApple       := $1
+SolidApple      := $2
 
-ScrollbarOptionMaskScrollbarPresent := $80
-ScrollbarOptionMaskScrollBoxPresent := $40
-ScrallbarOptionMaskScrollbarActive := $01
+.endscope
 
-ControlAreaDesktop := $0
-ControlAreaMenuBar := $1
-ControlAreaContentRegion := $2
-ControlAreaDragRegion := $3
-ControlAreaResizeBox := $4
-ControlAreaCloseBox := $5
+.scope MTTKWindowStatus
+        
+Open               := %10000000
+DrawResizeBox      := %00000100
+DrawVertScrollbar  := %00000010
+DrawHorizScrollbar := %00000001
 
-ControlRegionContent := $0
-ControlRegionVertScrollBar := $1
-ControlRegionHorizScrollBar := $2
-ControlRegionDeadZone := $3
+.endscope
+        
+.scope MTTKWindowOption
 
-WinOpClearToStartOfWindow := $1A
-WinOpClearToStartOfLine := $1B
-WinOpClearWindow := $1C
-WinOpClearToEndOfWindow := $1D
-WinOpClearLine := $1E
-WinOpClearToEndOfLine := $1F
+;;; The document pointer points to a function that renders the
+;;; window's contents, rather than to a document info structure.
+DocPtrFn         := %10000000
+;;; Text string pointer points to a BASIC string array element
+BASICArrayElem   := %00010000
+;;;  Text string pointer points to a BASIC string variable
+BASICString      := %00001000
+ResizeBoxPresent := %00000100
+CloseBoxPresent  := %00000010
+IsDialogOrAlert  := %00000001
 
-ControlPartUpOrLeftArrow := $01
-ControlPartDownOrRightArrow := $02
-ControlPartPageUpOrLeftRegion := $03
-ControlPartPageDownOrRightRegion := $04
-ControlPartScrollBox := $05
+.endscope
 
-ScrollControlOptionMaskScrollBarPresent := $80
-ScrollControlOptionMaskScrollBoxPresent := $40
-ScrollControlOptionMaskScrollBarActive := $01
+.scope MTTKScrollBarOption
+        
+ScrollbarPresent := %10000000
+ScrollBoxPresent := %01000000
+ScrollbarActive  := %00000001
 
-CharInvSpace := $20
-CharInvAsterisk := $2A
-CharSpace := $A0
-CharUnderscore := $DF
-CharCheckerboard := $FF
+.endscope
 
-TrackingModeNone := $00
-TrackingModeMenuInteraction := $01
+.scope MTTKControlArea
+        
+Desktop       := $0
+MenuBar       := $1
+ContentRegion := $2
+DragRegion    := $3
+ResizeBox     := $4
+CloseBox      := $5
+
+.endscope
+
+.scope MTTKControlRegion
+
+Content        := $0
+VertScrollBar  := $1
+HorizScrollBar := $2
+DeadZone       := $3
+
+.endscope
+        
+.scope MTTKWinOp
+        
+ClearToStartOfWindow := $1A
+ClearToStartOfLine   := $1B
+ClearWindow          := $1C
+ClearToEndOfWindow   := $1D
+ClearLine            := $1E
+ClearToEndOfLine     := $1F
+
+.endscope
+
+.scope MTTKControlPart
+        
+UpOrLeftArrow         := $01
+DownOrRightArrow      := $02
+PageUpOrLeftRegion    := $03
+PageDownOrRightRegion := $04
+ScrollBox             := $05
+
+.endscope
+
+.scope MTTKScrollControlOption
+        
+ScrollBarPresent := %10000000
+ScrollBoxPresent := %01000000
+ScrollBarActive  := %00000001
+
+.endscope
+
+.scope MTTKTrackingMode
+        
+None            := $00
+MenuInteraction := $01
 ;; mode 2 is undefined/unused
-TrackingModeDragWindow := $03
-TrackingModeResizeWindow := $04
-TrackingModeCloseBox := $05
-TrackingModeScrollBox :=$06
+DragWindow      := $03
+ResizeWindow    := $04
+CloseBox        := $05
+ScrollBox       := $06
+
+.endscope

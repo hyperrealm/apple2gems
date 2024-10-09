@@ -11,6 +11,9 @@
 
           .setcpu "6502"
 
+
+;;; Zero page pointers
+
 TextRowBasePtr        := $0000
 EventPtr              := $0002
 EventPtr2             := $0004
@@ -23,6 +26,18 @@ MenuBlockOrDocInfoPtr := $000F
 MenuStructPtr         := $0011
 MenuItemStructPtr     := $0013
 TextStringPtr         := $0015
+
+
+.scope MTTKChar
+        
+InvSpace     := $20
+InvAsterisk  := $2A
+Space        := $A0
+Underscore   := $DF
+Checkerboard := $FF
+
+.endscope
+
 
           .org   $6100
 
@@ -92,11 +107,11 @@ L6152:    and   #%01111111         ; strip off MSB to get param count
           lda   DispatchTable,y
           pha
           rts   ; RTS to jump to routine
-L616C:    lda   #ErrInvalidCall
+L616C:    lda   #MTTKError::InvalidCall
           bne   L6176 ; branch always taken
-L6170:    lda   #ErrWrongParamCount
+L6170:    lda   #MTTKError::WrongParamCount
           bne   L6176 ; branch always taken
-L6174:    lda   #ErrDesktopNotStarted
+L6174:    lda   #MTTKError::DesktopNotStarted
 L6176:    sta   LastError
           jmp   L617E
 
@@ -284,7 +299,7 @@ OUT:      rts
           cmp   #$08 ; slot >= 8 is invalid
           bcc   L62AA
           pla
-          lda   #ErrInvalidSlotNum
+          lda   #MTTKError::InvalidSlotNum
           bne   ReturnWithError
 L62AA:    ldx   #$01
           ora   #%11000000
@@ -301,7 +316,7 @@ L62BA:    jsr   CheckMouseFirmwareSignatureBytes
           bne   L62BA ; try next lower slot
           pla
           bpl   L62CB
-          lda   #ErrMouseNotFound
+          lda   #MTTKError::MouseNotFound
           bne   ReturnWithError
 L62CB:    tay
           lda   #$80
@@ -523,7 +538,7 @@ ProcStatusRegStorage:
 .proc ExitWithError
 
 ExitWithOSUnsupported:
-          lda   #ErrOSNotSupported
+          lda   #MTTKError::OSNotSupported
 ExitWithErrorInA:
           sta   LastError
 OUT:      rts
@@ -593,7 +608,7 @@ L64D8:    jsr   SetUserHook
           bpl   L64F8
           jsr   AllocInterrupt
           bcc   L64F8
-          lda   #ErrInstallIntFailed
+          lda   #MTTKError::InstallIntFailed
           jmp   ExitWithError::ExitWithErrorInA
 L64F8:    lda   MachineSubID
           cmp   #$40
@@ -699,7 +714,7 @@ L659F:    lda   L65AE,y        ; Copies SEC or JSR instruction
           sta   (EventPtr2),y  ; to (EventPtr2)
           plp
           rts
-L65A8:    lda   #ErrInvalidUserHookID
+L65A8:    lda   #MTTKError::InvalidUserHookID
           sta   LastError
           plp
 L65AE:    rts
@@ -712,15 +727,15 @@ CheckEventsHookCallSites:
           .addr CheckEventsPostHook
 
 ;;; ----------------------------------------
-;;; ToolKit call $12 (18) - undocumented
+;;; ToolKit call $12 (18)
 ;;; ----------------------------------------
 .proc SetBasAdr
           ldy   #$01
           lda   (ParamTablePtr),y
-          sta   TextPtrBaseAddress
+          sta   BASICStringArrayElemBaseAddress
           iny
           lda   (ParamTablePtr),y
-          sta   TextPtrBaseAddress+1
+          sta   BASICStringArrayElemBaseAddress+1
           rts
 .endproc
 
@@ -1017,20 +1032,28 @@ L675D:    pla   ; restore X and Y from stack
           rts
 .endproc
 
-TextPtrBaseAddress:
+;;; Base address of BASIC array elements. This is set to
+;;; ARYTAB ($006B) by the MTTK Ampersand interface library.
+;;; Applesoft's array space moves upward in memory as numeric
+;;; variables are allocated below it; therefore it is not possible
+;;; to store absolute addresses to string array elements, as the
+;;; arrays will move over time.
+BASICStringArrayElemBaseAddress:
           .word $0000
 
-;;; If undocumented bit 4 of the window option byte is set,
-;;; then add text pointer base address to the text pointer.
-;;; (This may be some form of rudimentary localization.)
+;;; If the text string pointer is a pointer to a BASIC
+;;; array variable element descriptor relative to the
+;;; text pointer base address (which is ARYTAB), then
+;;; dereference the pointer and add the current value of
+;;; the text pointer base address to it.
 .proc MaybeOffsetTextStringPtr
           lda   MenuOrWindowOptionByte
-          and   #%00010000 ; reserved bit 4
+          and   #MTTKWindowOption::BASICArrayElem
           beq   L6794 ; return if clear
-          lda   TextPtrBaseAddress
+          lda   BASICStringArrayElemBaseAddress
           sta   L6789
           sta   L6790
-          lda   TextPtrBaseAddress+1
+          lda   BASICStringArrayElemBaseAddress+1
           sta   L678A
           sta   L6791
           inc   L6790
@@ -1040,25 +1063,25 @@ L6785:    clc
           lda   TextStringPtr
 L6789 := * + 1
 L678A := * + 2
-          adc   TextPtrBaseAddress
+          adc   BASICStringArrayElemBaseAddress
           sta   TextStringPtr
           lda   TextStringPtr+1
 L6790 := * + 1
 L6791 := * + 2
-          adc   TextPtrBaseAddress+1
+          adc   BASICStringArrayElemBaseAddress+1
           sta   TextStringPtr+1
 L6794:    rts
 .endproc
 
-;;; if (undocumented) bit 3 of window option byte is set,
-;;; then the data pointed to by TextStringPtr is interpreted
-;;; as a length byte followed by a pointer to the actual text,
-;;; which is immediately preceded in memory by a length byte.
-;;; TextStringPtr is overwritten with that pointer, and
-;;; decremented by 1 in order to point to the length byte.
+;;; If the string pointer points to the data field of a BASIC
+;;; string variable descriptor, then dereference it.
+;;; The length of the string is byte 0 of the data field, and
+;;; the pointer to the actual string is in bytes 1-2 of the
+;;; data field. Then, decrement it by 1 to point to the length
+;;; byte that immediately precedes the string itself.
 .proc MaybeDerefTextStringPtr
           lda   MenuOrWindowOptionByte
-          and   #%00001000 ; reserved bit 3
+          and   #MTTKWindowOption::BASICString
           beq   OUT ; return if clear
           ldy   #$01
           lda   (TextStringPtr),y
@@ -1366,9 +1389,9 @@ L6982:    plp
           ldy   #$01
           lda   (ParamTablePtr),y ; event type
           bmi   L69B2
-          cmp   #EventTypeUpdate
+          cmp   #MTTKEventType::Update
           bcs   L69C9          ; invalid event type
-          cmp   #EventTypeKeyPress
+          cmp   #MTTKEventType::KeyPress
           beq   L69B2          ; if keypress, skip mouse pos update
           pha                  ; save event type on stack
           iny
@@ -1394,9 +1417,9 @@ L69B2:    clc
           sta   EventPtr+1
           jsr   EnqueueEvent
           bcc   OUT
-          lda   #ErrEventQueueFull
+          lda   #MTTKError::EventQueueFull
           jmp   L69CB
-L69C9:    lda   #ErrInvalidEvent
+L69C9:    lda   #MTTKError::InvalidEvent
 L69CB:    sta   LastError
 OUT:      plp
           rts
@@ -1427,7 +1450,7 @@ L69EF:    bit   MouseEmulationFlags ; A = 0 at this point
           bmi   L6A00 ; branch if yes
 L69FB:    bit   MouseButtonState
           bpl   L6A02
-L6A00:    lda   #EventTypeDrag
+L6A00:    lda   #MTTKEventType::Drag
 L6A02:    ldy   #$00
           sta   (EventPtr2),y ; set event type
           iny
@@ -1452,7 +1475,7 @@ L6A1C:    bcs   DONE
           bpl   L6A19
           lda   #$00
           sta   (MenuBarOrWindowPtr),y
-          lda   #EventTypeUpdate
+          lda   #MTTKEventType::Update
           ldy   #$00
           sta   (EventPtr2),y ; set event type
           ldy   #$00
@@ -1554,7 +1577,7 @@ PreviousAppleKeyModifierMask:
 CheckEvents:
           bit   InterruptAllocatedFlag
           bpl   CheckEventsPreHook   ; branch if no
-          lda   #ErrInterruptModeInUse
+          lda   #MTTKError::InterruptModeInUse
           sta   LastError
           rts
 CheckEventsPreHook:
@@ -1613,7 +1636,7 @@ L6AEB:    lda   SoftSwitch::KBD ; read keyboard soft switch
           bit   SoftSwitch::KBDSTRB ; clear keyboard strobe
           lda   AppleKeyModifierMask
           sta   EventBufferYCoord
-          lda   #EventTypeKeyPress
+          lda   #MTTKEventType::KeyPress
           sta   EventBufferEventType
           bne   EnqueueEventFromEventBuffer ; branch always taken
 L6B05:    bit   MouseEmulationFlags
@@ -1628,24 +1651,24 @@ L6B10:    lda   #$00
 L6B1A:    bmi   StartTrackingKeyboardMouseModeButton
           lda   AppleKeyModifierMask
           beq   L6B2E ; branch if neither Apple key is down
-          lda   #EventTypeAppleKeyDown
+          lda   #MTTKEventType::AppleKeyDown
           bne   L6B43 ; branch always taken
 PostNoneEvent:
-          lda   #EventTypeNone
+          lda   #MTTKEventType::None
           beq   L6B43 ; branch always taken
 StartTrackingKeyboardMouseModeButton:
           lda   #$80
           sta   SimulatedMouseButtonDownFlag
-L6B2E:    lda   #EventTypeButtonDown
+L6B2E:    lda   #MTTKEventType::ButtonDown
           bne   L6B43 ; branch always taken
 StopTrackingKeyboardMouseModeButton:
           lda   #$00
           sta   SimulatedMouseButtonDownFlag
 L6B37:    lda   MouseTrackingMode
-          cmp   #TrackingModeMenuInteraction
+          cmp   #MTTKTrackingMode::MenuInteraction
           bne   L6B41
           jsr   UpdateCoordOfMenuItemTitle
-L6B41:    lda   #EventTypeButtonUp ; create button-up event in buffer
+L6B41:    lda   #MTTKEventType::ButtonUp ; create button-up event in buffer
 L6B43:    sta   EventBufferEventType
           lda   MouseXCoord
           sta   EventBufferXCoord
@@ -1745,11 +1768,11 @@ MouseDragTrackingLastYCoord:
           sta   EventOutputPtr+1
           jsr   GetEvent::DequeueEvent
           lda   EventBuffer2EventType
-          cmp   #EventTypeButtonUp
+          cmp   #MTTKEventType::ButtonUp
           beq   L6C0A
-          cmp   #EventTypeNone
+          cmp   #MTTKEventType::None
           beq   L6C0A
-          cmp   #EventTypeDrag
+          cmp   #MTTKEventType::Drag
           bne   MouseDragTrackingRoutine
           lda   EventBuffer2XCoord
           cmp   MouseDragTrackingLastXCoord
@@ -1898,7 +1921,7 @@ L6D35:    jsr   GetHeadEvent
           bcs   L6D54 ; branch if queue empty
           ldy   #$00
           lda   (EventPtr2),y ; event type
-          cmp   #EventTypeKeyPress
+          cmp   #MTTKEventType::KeyPress
           bne   L6D75
           jsr   FlushEvents
           ldy   #$01
@@ -1970,14 +1993,14 @@ L6DC6:    pla
           beq   OUT
           lda   MouseTrackingMode
           beq   L6DE9 ; branch if no mouse tracking mode is active
-          cmp   #TrackingModeMenuInteraction
+          cmp   #MTTKTrackingMode::MenuInteraction
           beq   L6DE0
           jsr   ProcessKeyboardMouseModeEvent::FinishKeyboardMouseMode1
           jmp   L6DE9
 L6DE0:    jsr   UpdateCoordOfMenuItemTitle
           jsr   ProcessKeyboardEvents::PostNoneEvent
           jsr   ProcessKeyboardMouseModeEvent::FinishKeyboardMouseMode
-L6DE9:    lda   #EventTypeKeyPress
+L6DE9:    lda   #MTTKEventType::KeyPress
           sta   EventBufferEventType
           lda   KeyboardMouseModeSavedKeypress
           sta   EventBufferXCoord
@@ -2005,7 +2028,7 @@ KeyboardMouseModeSavedModifierMask:
 
 .proc UpdateCoordOfMenuItemTitle
            ldx   MouseTrackingMode
-           cpx   #TrackingModeMenuInteraction
+           cpx   #MTTKTrackingMode::MenuInteraction
            bne   OUT ; if not tracking menu interaction, return
            lda   SelectedMenuNumberOrID
            beq   OUT
@@ -2073,7 +2096,7 @@ L6E51:    cmp   #ControlChar::LeftArrow
 L6E59:    sec  ; no - invalid
           rts
 L6E5B:    ldx   MouseTrackingMode
-          cpx   #TrackingModeMenuInteraction
+          cpx   #MTTKTrackingMode::MenuInteraction
           beq   L6EC9
           tax
           bit   MouseEmulationFlags
@@ -2089,7 +2112,7 @@ L6E5B:    ldx   MouseTrackingMode
 L6E74:    ldy   ArrowKeyCoordinateTable-8,x
           bne   L6E9E          ; branch if vertical axis
           lda   MouseTrackingMode
-          cmp   #TrackingModeDragWindow
+          cmp   #MTTKTrackingMode::DragWindow
           bne   L6E9E          ; branch if not dragging window
           clc
           lda   MouseXCoord    ; adjust x-coordinate by appropriate delta
@@ -2112,7 +2135,7 @@ L6E9E:    clc                  ; Y = 2 here
 L6EA9:    tya
           beq   L6EC1          ; if < 0, clamp to 0 below
           lda   MouseTrackingMode
-          cmp   #TrackingModeDragWindow
+          cmp   #MTTKTrackingMode::DragWindow
           bne   L6EC1          ; branch if not dragging window
           lda   #$01
           bne   L6EC3          ; branch always taken
@@ -2491,7 +2514,7 @@ L7134:    lda   CalculateMenuSaveAreaAndEdgesMenuWidth
           lda   MenuSaveAreaSize
           cmp   MultiplyResult
           bcs   L715B
-L7156:    lda   #ErrSaveAreaTooSmall ; fail if provided save area is too small
+L7156:    lda   #MTTKError::SaveAreaTooSmall ; fail if provided save area is too small
           sta   LastError
 L715B:    pla   ; restore X
           tax
@@ -2513,7 +2536,7 @@ DrawMenuBarMenuCount:
 
 .proc DrawMenuBar
           jsr   LoadMenuBarStructPtr
-          lda   #CharInvSpace
+          lda   #MTTKChar::InvSpace
           sta   CharRegister
           lda   #$00
           sta   CurrentYCoord
@@ -2606,7 +2629,7 @@ L7217:    jsr   DrawMenuItem
           sta   CurrentYCoord
           lda   TextRectangleXCoord
           sta   CurrentXCoord
-          lda   #CharSpace
+          lda   #MTTKChar::Space
           sta   CharRegister
           jsr   PrintCharAtCurrentCoord
           inc   CurrentXCoord
@@ -2617,7 +2640,7 @@ L723F:    jsr   PrintCharAtCurrentCoord
           lda   CurrentXCoord
           cmp   TextRectangleEndXCoordPlus1
           bcc   L723F
-          lda   #CharSpace
+          lda   #MTTKChar::Space
           sta   CharRegister
           jsr   PrintCharAtCurrentCoord
           jsr   MoveCursorToLatestMousePos
@@ -2650,7 +2673,7 @@ OUT:      rts
           lda   (MenuItemStructPtr),y ; menu item option byte
           and   #%10000000
           beq   L72AD ; branch if not disabled
-L7294:    lda   #CharCheckerboard ; draw disabled checkerboards
+L7294:    lda   #MTTKChar::Checkerboard ; draw disabled checkerboards
           sta   CharRegister
           ldx   TextRectangleEndXCoordPlus1
           dex
@@ -2714,7 +2737,7 @@ L72F4:    sty   CharRegister
           sta   CharRegister
           jsr   PrintCharAtCurrentCoord
           inc   CurrentXCoord
-          lda   #CharSpace
+          lda   #MTTKChar::Space
           sta   CharRegister
           jsr   PrintCharAtCurrentCoord
 OUT:      rts
@@ -2748,7 +2771,7 @@ SelectedMenuTitleYCoord:
 .endproc
 
 .proc HandleMenuInteraction
-          lda   #TrackingModeMenuInteraction
+          lda   #MTTKTrackingMode::MenuInteraction
           sta   MouseTrackingMode
           jsr   LoadMenuBarStructPtr
           lda   #$00
@@ -2774,7 +2797,7 @@ L7341:    sta   SelectedMenuNumberOrID-1,x ; clear current/previous selected var
           jsr   SetMousePosition
           plp
           jsr   MoveCursorToLatestMousePos
-          lda   #EventTypeDrag
+          lda   #MTTKEventType::Drag
           sta   EventBuffer2EventType
           bne   L7383 ; branch always taken
 L737B:    jsr   MouseDragTrackingRoutine
@@ -2802,9 +2825,9 @@ L739F:    lda   SelectedMenuNumberOrID
           beq   L73BA ; branch if selected menu item didn't change
           jsr   MoveMenuItemHighlight
 L73BA:    lda   EventBuffer2EventType
-          cmp   #EventTypeButtonUp
+          cmp   #MTTKEventType::ButtonUp
           beq   L73CA
-          cmp   #EventTypeNone
+          cmp   #MTTKEventType::None
           bne   L737B
           lda   #$00
           sta   SelectedMenuItemNumber
@@ -2829,7 +2852,7 @@ L73F0:    sta   SelectedMenuNumberOrID
           lda   PreviousSelectedMenuNumber
           beq   L73FD
           jsr   OutputMenuTitleInverse
-L73FD:    lda   #TrackingModeNone
+L73FD:    lda   #MTTKTrackingMode::None
           sta   MouseTrackingMode
           rts
 .endproc
@@ -2888,7 +2911,7 @@ OutputMenuTitleRightXCoord:
           .byte $00
 
 .proc OutputMenuTitleInverse
-          lda   #CharInvSpace
+          lda   #MTTKChar::InvSpace
           sta   OutputMenuTitleSpaceChar
           jsr   GetMenuTitle
           jsr   OutputText::OutputTextInverse
@@ -2896,7 +2919,7 @@ OutputMenuTitleRightXCoord:
 .endproc
 
 .proc OutputMenuTitleNormal
-          lda   #CharSpace
+          lda   #MTTKChar::Space
           sta   OutputMenuTitleSpaceChar
           jsr   GetMenuTitle
           jsr   OutputText::OutputTextNormal
@@ -2905,7 +2928,7 @@ OutputMenuTitleRightXCoord:
 
 .proc OutputMenuTitleDisabled
           jsr   OutputMenuTitleNormal
-          lda   #CharCheckerboard
+          lda   #MTTKChar::Checkerboard
           sta   CharRegister
           ldy   #$07
           lda   (MenuBlockOrDocInfoPtr),y ; left for hilite/select
@@ -3030,7 +3053,7 @@ DrawMenuItemMarkChar:
           .byte $00 ; mark character
 
 .proc DrawMenuItemTitleAndMarkNormal
-          ldx   #CharSpace
+          ldx   #MTTKChar::Space
           stx   OutputMenuTitleSpaceChar
           ldx   #MouseText::Checkmark
           stx   DrawMenuItemMarkChar
@@ -3042,7 +3065,7 @@ DrawMenuItemMarkChar:
 .endproc
 
 .proc DrawMenuItemTitleAndMarkInverse
-          ldx   #CharInvSpace
+          ldx   #MTTKChar::InvSpace
           stx   OutputMenuTitleSpaceChar
           ldx   #MouseText::InverseCheckmark
           stx   DrawMenuItemMarkChar
@@ -3313,7 +3336,7 @@ L1:       ldy   #$01
           and   #%01111111
           sta   (MenuBlockOrDocInfoPtr),y
           rts
-ERR:      lda   #ErrInvalidMenuID
+ERR:      lda   #MTTKError::InvalidMenuID
           sta   LastError
           rts
 .endproc
@@ -3422,9 +3445,9 @@ L77C3:    tax
           jsr   LoadMenuItemPtrForItemX
           clc
           rts
-L77C9:    lda   #ErrInvalidMenuID
+L77C9:    lda   #MTTKError::InvalidMenuID
           bne   L77CF
-L77CD:    lda   #ErrInvalidMenuItemNum
+L77CD:    lda   #MTTKError::InvalidMenuItemNum
 L77CF:    sta   LastError
           sec
           rts
@@ -3478,7 +3501,7 @@ LOOP2:    lda   (ParamTablePtr),y ; save reserved mem ptr, size
           jsr   FindWindowByIDInA
           bcc   L782E                  ; window already open
           jsr   LoadWindowPtrFromParamTable
-          lda   #ErrNone
+          lda   #MTTKError::None
           sta   LastError
           lda   #%10000000
           ldy   #$16
@@ -3490,10 +3513,10 @@ LOOP2:    lda   (ParamTablePtr),y ; save reserved mem ptr, size
 L7821:    jsr   ClampWindowPosition
           jsr   DrawNewWindow
           rts
-L7828:    lda   #ErrBadWindowInfo
+L7828:    lda   #MTTKError::BadWindowInfo
           sta   LastError
           rts
-L782E:    lda   #ErrWindowAlreadyOpen
+L782E:    lda   #MTTKError::WindowAlreadyOpen
           sta   LastError
           jsr   SelectCurrentWindow
           rts
@@ -3579,9 +3602,9 @@ L78B1:    cpx   #$02
           bcc   L78B7 ; branch if < 2 (it's invalid)
           clc   ; validated successfully
           rts
-L78B7:    lda   #ErrBadWindowInfo
+L78B7:    lda   #MTTKError::BadWindowInfo
           bne   L78BD ; branch always taken
-L78BB:    lda   #ErrWindowBufferTooSmall
+L78BB:    lda   #MTTKError::WindowBufferTooSmall
 L78BD:    sta   LastError
           sec
           rts
@@ -3668,7 +3691,7 @@ L7929:    ldy   #$00
           beq   L793D ; if they match, window found
           jsr   NextWindow ; otherwise continue with next window
           bcc   L7929
-L7937:    lda   #ErrInvalidWindowID
+L7937:    lda   #MTTKError::InvalidWindowID
           sta   LastError
           rts
 L793D:    jsr   CacheWindowContentSizeAdjustedForScrollBars
@@ -3678,7 +3701,7 @@ L7940:    clc
 .proc GetFrontWindowOrFail
           jsr   GetFrontWindow
           bcc   OUT
-          lda   #ErrNoWindows
+          lda   #MTTKError::NoWindows
           sta   LastError
 OUT:      rts
 .endproc
@@ -3988,12 +4011,12 @@ OK:       ldy   #$02 ; copy window ptr to param table
           lda   (ParamTablePtr),y
           sta   ScreenCoordinatesY
           bne   L7B39
-          ldx   #ControlAreaMenuBar ; y coord is 0
+          ldx   #MTTKControlArea::MenuBar ; y coord is 0
           lda   #$00
           beq   L7BA1 ; branch always taken
 L7B39:    jsr   GetFrontWindow
           bcc   L7B44
-L7B3E:    ldx   #ControlAreaDesktop ; no windows are open
+L7B3E:    ldx   #MTTKControlArea::Desktop ; no windows are open
           lda   #$00
           beq   L7BA1 ; branch always taken
 L7B44:    jsr   IsPointInWindow
@@ -4007,7 +4030,7 @@ L7B44:    jsr   IsPointInWindow
           beq   L7B9B ; branch if not
           lda   WindowCoordinatesX
           bne   L7B9B ; if x != 0, it's not the close box
-          ldx   #ControlAreaCloseBox
+          ldx   #MTTKControlArea::CloseBox
           jmp   L7B9D
 L7B62:    ldy   #$01
           lda   (MenuBarOrWindowPtr),y ; window option byte
@@ -4025,7 +4048,7 @@ L7B62:    ldy   #$01
           ldy   #$09
           cmp   (MenuBarOrWindowPtr),y ; current content length
           bne   L7B96 ; y != content length, then it's not the resize box
-          ldx   #ControlAreaResizeBox
+          ldx   #MTTKControlArea::ResizeBox
           jmp   L7B9D
 L7B85:    jsr   NextWindow ; try next window
           bcs   L7B3E ; branch if no more windows
@@ -4034,9 +4057,9 @@ L7B85:    jsr   NextWindow ; try next window
           lda   WindowCoordinatesY
           cmp   #$FF  ; y == -1 ?
           beq   L7B9B ; branch if yes
-L7B96:    ldx   #ControlAreaContentRegion
+L7B96:    ldx   #MTTKControlArea::ContentRegion
           jmp   L7B9D
-L7B9B:    ldx   #ControlAreaDragRegion ; in window title bar
+L7B9B:    ldx   #MTTKControlArea::DragRegion ; in window title bar
 L7B9D:    ldy   #$00
           lda   (MenuBarOrWindowPtr),y ; set window ID in params
 L7BA1:    ldy   #$04
@@ -4089,7 +4112,7 @@ TrackGoAwaySavedCursorChar:
           jsr   GetFrontWindowOrFail
           bcc   L7BE6
           rts
-L7BE6:    lda   #TrackingModeCloseBox
+L7BE6:    lda   #MTTKTrackingMode::CloseBox
           sta   MouseTrackingMode
           lda   CursorChar
           sta   TrackGoAwaySavedCursorChar
@@ -4109,7 +4132,7 @@ L7C07:    jsr   MouseDragTrackingRoutine
           lda   EventBuffer2YCoord
           cmp   ScreenCoordinatesY
           bne   L7C20 ; branch if y-coord changed
-          lda   #CharInvAsterisk
+          lda   #MTTKChar::InvAsterisk
           bne   L7C23 ; branch always taken
 L7C20:    lda   TrackGoAwaySavedCursorChar
 L7C23:    jsr   ChangeCursorChar
@@ -4117,7 +4140,7 @@ L7C23:    jsr   ChangeCursorChar
 L7C29:    lda   TrackGoAwaySavedCursorChar
           jsr   ChangeCursorChar
           lda   EventBuffer2EventType
-          cmp   #EventTypeButtonUp
+          cmp   #MTTKEventType::ButtonUp
           bne   L7C4A
           lda   EventBuffer2XCoord ; did coordinates change?
           cmp   ScreenCoordinatesX
@@ -4130,7 +4153,7 @@ L7C29:    lda   TrackGoAwaySavedCursorChar
 L7C4A:    lda   #$00 ; window size didn't change
 L7C4C:    ldy   #$01
           sta   (ParamTablePtr),y ; set result value
-          lda   #TrackingModeNone
+          lda   #MTTKTrackingMode::None
           sta   MouseTrackingMode
           rts
 .endproc
@@ -4192,7 +4215,7 @@ WindowDragWindowYCoord2:
           jsr   RecordDragStartPosition
           bcc   L7CB6
 L7CA5:    jsr   PlayTone::PlayTone1 ; fail if trying to drag alert/dialog
-          lda   #ErrCallFailed
+          lda   #MTTKError::CallFailed
           sta   LastError
           bit   MouseEmulationFlags
           bvc   L7CB5 ; branch if Keyboard Mouse Mode off
@@ -4206,7 +4229,7 @@ L7CB6:    ldy   #$02
           lda   (ParamTablePtr),y ; save y-coord of drag start
           sta   WindowDragStartYCoord
           sta   MouseDragTrackingLastYCoord
-          lda   #TrackingModeDragWindow
+          lda   #MTTKTrackingMode::DragWindow
           sta   MouseTrackingMode
           ldy   #$04 ; save window's original coords in two buffers
 L7CD0:    lda   (MenuBarOrWindowPtr),y
@@ -4229,7 +4252,7 @@ L7CE9:    jsr   MouseDragTrackingRoutine
           jmp   L7CE9
 L7D00:    jsr   UndrawWindowOutline
           lda   EventBuffer2EventType
-          cmp   #EventTypeButtonUp
+          cmp   #MTTKEventType::ButtonUp
           bne   L7D2B ; branch if drag was canceled
           ldy   #$04
           lda   WindowDragWindowXCoord2
@@ -4252,7 +4275,7 @@ L7D2F:    lda   WindowDragWindowXCoord2,x ; update window with final position
           inx
           cpx   #$04
           bcc   L7D2F
-L7D3A:    lda   #TrackingModeNone
+L7D3A:    lda   #MTTKTrackingMode::None
           sta   MouseTrackingMode
           rts
 .endproc
@@ -4411,7 +4434,7 @@ GrowWindowSizeChangedFlag:
           jsr   SetMousePositionForWindowResize
           bcc   L7E45
 L7E34:    jsr   PlayTone::PlayTone1
-          lda   #ErrCallFailed
+          lda   #MTTKError::CallFailed
           sta   LastError
           bit   MouseEmulationFlags ; turn off keyboard mouse mode if on
           bvc   L7E44 ; branch if Keyboard Mouse Mode off
@@ -4427,7 +4450,7 @@ L7E45:    lda   ScreenCoordinatesX ; save resize start pos (coord of resize box)
           jsr   HideCursor
           jsr   DrawWindowOutline
           jsr   ShowCursor
-          lda   #TrackingModeResizeWindow
+          lda   #MTTKTrackingMode::ResizeWindow
           sta   MouseTrackingMode
 L7E68:    jsr   MouseDragTrackingRoutine
           bcs   L7E82 ; branch if drag finished
@@ -4440,7 +4463,7 @@ L7E68:    jsr   MouseDragTrackingRoutine
           jmp   L7E68
 L7E82:    jsr   UndrawWindowOutline
           lda   EventBuffer2EventType
-          cmp   #EventTypeButtonUp
+          cmp   #MTTKEventType::ButtonUp
           bne   L7EBC ; cancel operation
           lda   GrowWindowRightXCoord
           cmp   MouseDragTrackingLastXCoord
@@ -4468,7 +4491,7 @@ L7EBC:    ldy   #$08
           lda   GrowWindowInitialHeight
           sta   (MenuBarOrWindowPtr),y ; restore initial height
           jsr   CacheWindowContentSizeAdjustedForScrollBars
-L7ECD:    lda   #TrackingModeNone
+L7ECD:    lda   #MTTKTrackingMode::None
           sta   MouseTrackingMode
           rts
 .endproc
@@ -4703,17 +4726,17 @@ OUT:      rts
           rts
 OK:       ldy   #$06
           lda   (ParamTablePtr),y ; window operation type
-          cmp   #WinOpClearToStartOfWindow
+          cmp   #MTTKWinOp::ClearToStartOfWindow
           beq   ClearToStartOfWindow
-          cmp   #WinOpClearToStartOfLine
+          cmp   #MTTKWinOp::ClearToStartOfLine
           beq   ClearToStartOfLine
-          cmp   #WinOpClearWindow
+          cmp   #MTTKWinOp::ClearWindow
           beq   ClearWindowContentArea
-          cmp   #WinOpClearToEndOfWindow
+          cmp   #MTTKWinOp::ClearToEndOfWindow
           beq   ClearToEndOfWindow
-          cmp   #WinOpClearLine
+          cmp   #MTTKWinOp::ClearLine
           beq   ClearLine
-          cmp   #WinOpClearToEndOfLine
+          cmp   #MTTKWinOp::ClearToEndOfLine
           beq   ClearToEndOfLine
           rts
 .endproc
@@ -4821,7 +4844,7 @@ StartIndexOfStringToOutput:
 .proc WinString
           jsr   ProcessWinTextParams
           bcs   OUT
-          lda   (ParamTablePtr),y ; number of chars to display (must be 0)
+          lda   (ParamTablePtr),y ; option byte
           sta   MenuOrWindowOptionByte
           jsr   MaybeOffsetTextStringPtr
           ldy   #$00
@@ -5024,7 +5047,7 @@ L82A7 := * + 2
           tax   ; save error from routine in X
           beq   L82AF ; branch if no error
           pla
-          lda   #ErrUserHookRoutineError ; replace error saved on stack
+          lda   #MTTKError::UserHookRoutineError ; replace error saved on stack
           pha
 L82AF:    pla ; restore last error from stack
           sta   LastError
@@ -5099,7 +5122,7 @@ L831B:     sta   WindowHasCloseBoxFlag
            lda   #MouseText::OverUnderScore
            bit   WindowIsDialogOrAlertFlag
            bpl   L8329 ; branch if not dialog/alert
-           lda   #CharUnderscore
+           lda   #MTTKChar::Underscore
 L8329:     jsr   DrawRowOfCharAcrossWindow ; draw top edge of window
            lda   #MouseText::LeftVerticalBar
            jsr   DrawColumnOfCharAcrossWindow ; draw right edge of window
@@ -5140,7 +5163,7 @@ LOOP:     lda   WindowCharToOutput
           sta   WindowCharToOutput
           bit   WindowIsDialogOrAlertFlag
           bpl   SKIP
-          lda   #CharSpace
+          lda   #MTTKChar::Space
 SKIP:     jsr   OutputWindowCharWithBackingStore
           jsr   IncrementWindowDrawingYCoord
           lda   WindowContentLength
@@ -5150,7 +5173,7 @@ LOOP:     lda   WindowCharToOutput
           jsr   IncrementWindowDrawingYCoord
           dec   WindowDrawingYCounter ; y coord ++
           bne   LOOP
-          lda   #CharSpace
+          lda   #MTTKChar::Space
           jsr   OutputWindowCharWithBackingStore
           rts
 .endproc
@@ -5436,7 +5459,7 @@ EraseWindowRegion:
 EraseWindowRegionNoClamp:
           jsr   CalculateWindowTextBoxClipRect
 EraseWindowRegionNoClip:
-          lda   #CharSpace
+          lda   #MTTKChar::Space
           sta   CharRegister
           lda   WindowClipRectStartY
           sta   CurrentYCoord
@@ -5830,7 +5853,7 @@ UpdateCachedWindowStateWindowStatusByte:
           .byte $00            ; window status byte bits 3-7
 
 ;;; Caches some flags from the two scroll bar option bytes into the
-;;; undocumented bits of the window option byte. Also, if the resize
+;;; undocumented bits of the window status byte. Also, if the resize
 ;;; box is enabled but both scroll bars aren't enabled, forces the
 ;;; vertical scroll bar to be enabled.
 .proc UpdateCachedWindowState
@@ -6029,7 +6052,7 @@ PointYInWindowCoord:
           jsr   GetFrontWindowOrFail
           bcc   L89A5
           rts
-L89A5:    lda   #ControlRegionContent
+L89A5:    lda   #MTTKControlRegion::Content
           sta   ControlRegion
           ldy   #$01
           lda   (ParamTablePtr),y ; point x-coord
@@ -6051,7 +6074,7 @@ L89A5:    lda   #ControlRegionContent
           cmp   PointYInWindowCoord
           beq   L89D3
           bcs   L8A26 ; branch if >
-L89D3:    lda   #ControlRegionDeadZone
+L89D3:    lda   #MTTKControlRegion::DeadZone
           sta   ControlRegion
           ldy   #$10
           lda   (MenuBarOrWindowPtr),y ; horiz control option byte
@@ -6062,11 +6085,11 @@ L89D3:    lda   #ControlRegionDeadZone
           bpl   L89FD ; branch if no
           lda   PointXInWindowCoord
           bne   L89F1 ; branch if non-zero
-          lda   #ControlPartUpOrLeftArrow
+          lda   #MTTKControlPart::UpOrLeftArrow
           jmp   L8A1B
 L89F1:    cmp   RightScrollArrowXPos
           bne   L89FB
-          lda   #ControlPartDownOrRightArrow
+          lda   #MTTKControlPart::DownOrRightArrow
           jmp   L8A1B
 L89FB:    bcc   L8A00
 L89FD:    jmp   L8A90
@@ -6075,14 +6098,14 @@ L8A00:    bit   HBarScrollBoxPresentFlag
           lda   PointXInWindowCoord
           cmp   HorizScrollBoxPosition
           bne   L8A12
-          lda   #ControlPartScrollBox
+          lda   #MTTKControlPart::ScrollBox
           jmp   L8A1B
 L8A12:    bcc   L8A19
-          lda   #ControlPartPageDownOrRightRegion
+          lda   #MTTKControlPart::PageDownOrRightRegion
           jmp   L8A1B
-L8A19:    lda   #ControlPartPageUpOrLeftRegion
+L8A19:    lda   #MTTKControlPart::PageUpOrLeftRegion
 L8A1B:    sta   ControlPart
-          lda   #ControlRegionHorizScrollBar
+          lda   #MTTKControlRegion::HorizScrollBar
           sta   ControlRegion
           jmp   L89FD
 L8A26:    ldy   #$16
@@ -6093,7 +6116,7 @@ L8A26:    ldy   #$16
           cmp   PointXInWindowCoord
           beq   L8A38
           bcs   L8A90 ; branch if >
-L8A38:    lda   #ControlRegionDeadZone
+L8A38:    lda   #MTTKControlRegion::DeadZone
           sta   ControlRegion
           lda   CurrentContentWidthMinus2
           cmp   PointXInWindowCoord
@@ -6111,7 +6134,7 @@ L8A38:    lda   #ControlRegionDeadZone
           jmp   L8A85
 L8A5E:    cmp   DownScrollArrowYPos
           bne   L8A68
-          lda   #ControlPartDownOrRightArrow
+          lda   #MTTKControlPart::DownOrRightArrow
           jmp   L8A85
 L8A68:    bcs   L8A90
           bit   VBarScrollBoxPresentFlag
@@ -6119,14 +6142,14 @@ L8A68:    bcs   L8A90
           lda   PointYInWindowCoord
           cmp   VertScrollBoxPosition
           bne   L8A7C
-          lda   #ControlPartScrollBox
+          lda   #MTTKControlPart::ScrollBox
           jmp   L8A85
 L8A7C:    bcc   L8A83
-          lda   #ControlPartPageDownOrRightRegion
+          lda   #MTTKControlPart::PageDownOrRightRegion
           jmp   L8A85
-L8A83:    lda   #ControlPartPageUpOrLeftRegion
+L8A83:    lda   #MTTKControlPart::PageUpOrLeftRegion
 L8A85:    sta   ControlPart
-          lda   #ControlRegionVertScrollBar
+          lda   #MTTKControlRegion::VertScrollBar
           sta   ControlRegion
           jmp   L8A90
 L8A90:    lda   ControlRegion ; set results in param table
@@ -6323,7 +6346,7 @@ DrawWindowRightEdgeSecondChar:
 
 ;;; This draws a column of right vertical bars followed by a column of spaces.
 DrawWindowRightEdge:
-          lda   #CharSpace
+          lda   #MTTKChar::Space
           sta   DrawWindowRightEdgeSecondChar
 DrawWindowRightEdge1:
           lda   #MouseText::RightVerticalBar
@@ -6372,10 +6395,10 @@ LOOP:     lda   #$01
 ;;; Resize box consists of two characters, but which two depends on
 ;;; properties of the window (whether active, which scroll bars present)
 ResizeBoxChars:
-          .byte MouseText::Overscore, CharSpace ; first set
+          .byte MouseText::Overscore, MTTKChar::Space ; first set
           .byte MouseText::Overscore, MouseText::Overscore ; second set
-          .byte MouseText::RightVerticalBar, CharSpace ; third set
-          .byte CharInvSpace, MouseText::DottedBox     ; fourth set
+          .byte MouseText::RightVerticalBar, MTTKChar::Space ; third set
+          .byte MTTKChar::InvSpace, MouseText::DottedBox     ; fourth set
           .byte MouseText::RightVerticalBar, MouseText::DottedBox ; fifth set
 
 ResizeBoxChar1:
@@ -6596,7 +6619,7 @@ OUT:      rts
           beq   HORIZ
           cmp   #$01           ; vert
           beq   VERT
-          lda   #ErrInvalidControlID
+          lda   #MTTKError::InvalidControlID
           sta   LastError
 ERR:      sec
           rts
@@ -6702,7 +6725,7 @@ ScrollBoxPositionChanged:
 ;;; ToolKit call $29 (41)
 ;;; ----------------------------------------
 .proc TrackThumb
-          lda   #TrackingModeScrollBox
+          lda   #MTTKTrackingMode::ScrollBox
           sta   MouseTrackingMode
           jsr   WhichScrollBarInParams
           bcs   DONE
@@ -6718,7 +6741,7 @@ SKIP:     lda   (MenuBarOrWindowPtr),y
           lda   ScrollBoxPositionChanged
           iny
           sta   (ParamTablePtr),y
-DONE:     lda   #TrackingModeNone
+DONE:     lda   #MTTKTrackingMode::None
           sta   MouseTrackingMode
           rts
 .endproc
@@ -6757,7 +6780,7 @@ L8E79:    jsr   MouseDragTrackingRoutine
           jmp   L8E79
 L8E92:    jsr   RestoreCharUnderHorizScrollBox
           lda   EventBuffer2EventType
-          cmp   #EventTypeButtonUp
+          cmp   #MTTKEventType::ButtonUp
           bne   L8EA4
           lda   MouseXOrYCoordInScrollBar
           cmp   EventBuffer2XCoord
@@ -6800,7 +6823,7 @@ L8EE1:    jsr   MouseDragTrackingRoutine
           jmp   L8EE1
 L8EFA:    jsr   RestoreCharUnderVertScrollBox
           lda   EventBuffer2EventType
-          cmp   #EventTypeButtonUp
+          cmp   #MTTKEventType::ButtonUp
           bne   L8F0C
           lda   MouseXOrYCoordInScrollBar
           cmp   EventBuffer2YCoord
@@ -6885,7 +6908,7 @@ L8F85:    ldx   CurrentWidthOrLengthMinusOneForScrollBarTracking
 .proc DrawHorizScrollBoxGrip
           ldx   ScrollBoxXOrYCoord
           ldy   CurrentContentLengthMinus1
-          lda   #CharCheckerboard
+          lda   #MTTKChar::Checkerboard
           jsr   OutputCharInWindowAtXY
           rts
 .endproc
@@ -6893,7 +6916,7 @@ L8F85:    ldx   CurrentWidthOrLengthMinusOneForScrollBarTracking
 .proc DrawVertScrollBoxGrip
           ldy   ScrollBoxXOrYCoord
           ldx   CurrentContentWidthMinus1
-          lda   #CharCheckerboard
+          lda   #MTTKChar::Checkerboard
           jsr   OutputCharInWindowAtXY
           rts
 .endproc

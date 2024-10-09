@@ -81,6 +81,7 @@ EXTRNCMD := $BE06 ; External command handler entry point
 ;;; Entry points
 CIENTRY := $BE00  ; BASIC.System warmstart entry point.
 DOSCMD   := $BE03 ; Execute command in input buffer.
+ERROUT   := $BE09 ; Handle ONERR or print error.
 GOSYSTEM := $BE70 ; Perform MLI call in A via BASIC.SYSTEM.
 GETBUFR  := $BEF5 ; Allocate I/O buffer.
 FREEBUFR := $BEF8 ; Release I/O buffer.

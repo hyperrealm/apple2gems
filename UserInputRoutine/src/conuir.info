@@ -1,0 +1,30 @@
+
+GLOBAL {
+       OUTPUTNAME "ConsoleDriverAndUserInputRoutine.s";
+       INPUTNAME  "../obj/CONUIR.OBJ#064000";
+       STARTADDR  $4000;
+       CPU "6502";
+};
+
+ASMINC { FILE "../../asminc/disasm.inc"; };
+
+RANGE { START $4003; END $4032; TYPE AddrTable; };
+RANGE { START $44F1; END $4509; TYPE ByteTable; };
+RANGE { START $41F9; END $41FC; TYPE ByteTable; };
+RANGE { START $4333; END $4338; TYPE ByteTable; };
+
+RANGE { START $450A; END $4547; TYPE ByteTable; };
+RANGE { START $4643; END $4645; TYPE ByteTable; };
+RANGE { START $4A14; END $4b76; TYPE ByteTable; };
+
+RANGE { START $4da6; END $4dc1; TYPE ByteTable; };
+
+RANGE { START $511f; END $5123; TYPE ByteTable; };
+RANGE { START $515d; END $515f; TYPE ByteTable; };
+
+RANGE { START $51a3; END $51a8; TYPE ByteTable; };
+RANGE { START $51ef; END $51f2; TYPE ByteTable; };
+
+RANGE { START $526e; END $528d; TYPE ByteTable; };
+RANGE { START $52f5; END $530c; TYPE ByteTable; };
+
